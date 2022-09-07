@@ -276,6 +276,20 @@ async def help(interaction: discord.Interaction):
         inline=False
     )
 
+    # get_channel_id command
+    embed.add_field(
+        name='/get_channel_id',
+        value='Shows the ID of the channel where the command is used.',
+        inline=False
+    )
+
+    # set_events_channel command
+    embed.add_field(
+        name='/set_events_channel',
+        value='Sets the channel where event messages will be located. Required for some commands.',
+        inline=False
+    )
+
     await interaction.followup.send(file=file, embed=embed)
 
 # Get the channel id where the command was used. Useful for the set_events_channel command.
@@ -748,7 +762,7 @@ async def send_signup_reminder(interaction: discord.Interaction, event_id: str):
     message = ' '.join([
         f'{interaction.user.display_name} is reminding',
         mentions,
-        f'that you are signed up for `{event_info[4]}` at <t:{event_info[3]}>'])
+        f'that you are signed up for `{event_info[4]}` <t:{event_info[3]}:R>'])
 
     await interaction.delete_original_response()
     await interaction.channel.send(message)
