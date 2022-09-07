@@ -1,0 +1,2 @@
+git+https://github.com/rapptz/discord.py@master#egg=discord.py
+python-dotenv==0.20.0
