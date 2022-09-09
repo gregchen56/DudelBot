@@ -201,10 +201,18 @@ async def help(interaction: discord.Interaction):
         inline=False
     )
 
-    # delete_event command
+    # end_event command
     embed.add_field(
-        name='/delete_event',
-        value=f'''Delete an event that you are hosting.
+        name='/end_event',
+        value=f'''End an event that has concluded.
+                Requires the [{EVENT_MANAGER_ROLE}] role.''',
+        inline=False
+    )
+
+    # cancel_event command
+    embed.add_field(
+        name='/cancel_event',
+        value=f'''Cancel an event that you are hosting.
                 This will also notify all users who are currently signed up.
                 Requires the [{EVENT_MANAGER_ROLE}] role.''',
         inline=False
@@ -465,10 +473,10 @@ async def create_event_error_handler(interaction: discord.Interaction, error:app
 @app_commands.check(is_event_channel_set)
 @discord.app_commands.checks.has_role(EVENT_MANAGER_ROLE)
 @app_commands.describe(
-    event_id='The ID of the event you want to delete. Typically found in the footer of the event message.'
+    event_id='The ID of the event you want to end. Typically found in the footer of the event message.'
 )
-async def delete_event(interaction: discord.Interaction, event_id: str):
-    '''Delete an event that you are hosting. This will also notify all users who are currently signed up.'''
+async def end_event(interaction: discord.Interaction, event_id: str):
+    '''End an event that has concluded.'''
     await interaction.response.defer(ephemeral=True)
     event_info = get_event_info(event_id)
 
@@ -477,8 +485,53 @@ async def delete_event(interaction: discord.Interaction, event_id: str):
         return
 
     if interaction.user.id != event_info[2]:
-        await interaction.followup.send('You cannot delete events where you are not the host')
-        log_message(f'User {interaction.user.id} tried to delete event {event_id} but is not the event host!')
+        await interaction.followup.send('You cannot end events where you are not the host')
+        log_message(f'User {interaction.user.id} tried to end event {event_id} but is not the event host!')
+        return
+
+    player_ids = fetch_event_signup_distinct_player_ids(event_id)
+    for id in player_ids:
+        delete_user_from_signups(event_id, id[0])
+
+    delete_event_by_id(event_id)
+    event_message = await get_event_message(client.guild_channels[interaction.guild_id], event_id)
+    await event_message.delete()
+    await interaction.followup.send('Event ended.')
+
+# end_event command error handler
+@end_event.error
+async def end_event_error_handler(interaction: discord.Interaction, error:app_commands.AppCommandError):
+    if isinstance(error, app_commands.MissingRole):
+        log_message(f'User ID: {interaction.user.id} tried to end an event but does not have the [{EVENT_MANAGER_ROLE}] role')
+        await interaction.response.send_message(f'[{EVENT_MANAGER_ROLE}] role required to end events.')
+
+    elif isinstance(error, app_commands.CheckFailure):
+        log_message(f'User ID: {interaction.user.id} tried to end an event but the event channel is not set')
+        await interaction.response.send_message('Event channel is not set. Please run /set_events_channel')
+
+    else:
+        log_error()
+        raise
+
+
+@client.tree.command()
+@app_commands.check(is_event_channel_set)
+@discord.app_commands.checks.has_role(EVENT_MANAGER_ROLE)
+@app_commands.describe(
+    event_id='The ID of the event you want to cancel. Typically found in the footer of the event message.'
+)
+async def cancel_event(interaction: discord.Interaction, event_id: str):
+    '''Cancel an event that you are hosting. This will also notify all users who are currently signed up.'''
+    await interaction.response.defer(ephemeral=True)
+    event_info = get_event_info(event_id)
+
+    if not event_info:
+        await interaction.followup.send('Event does not exist')
+        return
+
+    if interaction.user.id != event_info[2]:
+        await interaction.followup.send('You cannot cancel events where you are not the host')
+        log_message(f'User {interaction.user.id} tried to cancel event {event_id} but is not the event host!')
         return
 
     player_ids = fetch_event_signup_distinct_player_ids(event_id)
@@ -490,17 +543,17 @@ async def delete_event(interaction: discord.Interaction, event_id: str):
     delete_event_by_id(event_id)
     event_message = await get_event_message(client.guild_channels[interaction.guild_id], event_id)
     await event_message.delete()
-    await interaction.followup.send('Event deleted.')
+    await interaction.followup.send('Event cancelled.')
 
-# delete_event command error handler
-@delete_event.error
+# cancel_event command error handler
+@cancel_event.error
 async def delete_event_error_handler(interaction: discord.Interaction, error:app_commands.AppCommandError):
     if isinstance(error, app_commands.MissingRole):
-        log_message(f'User ID: {interaction.user.id} tried to delete an event but does not have the [{EVENT_MANAGER_ROLE}] role')
-        await interaction.response.send_message(f'[{EVENT_MANAGER_ROLE}] role required to delete events.')
+        log_message(f'User ID: {interaction.user.id} tried to cancel an event but does not have the [{EVENT_MANAGER_ROLE}] role')
+        await interaction.response.send_message(f'[{EVENT_MANAGER_ROLE}] role required to cancel events.')
 
     elif isinstance(error, app_commands.CheckFailure):
-        log_message(f'User ID: {interaction.user.id} tried to delete an event but the event channel is not set')
+        log_message(f'User ID: {interaction.user.id} tried to cancel an event but the event channel is not set')
         await interaction.response.send_message('Event channel is not set. Please run /set_events_channel')
 
     else:
