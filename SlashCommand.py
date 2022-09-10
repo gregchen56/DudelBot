@@ -389,7 +389,7 @@ async def create_event(
     try:
         e_datetime = dt.strptime(' '.join([day, hour, minute, am_pm, utc_offset]), '%m/%d/%y %I %M %p %z')
     except ValueError:
-        await interaction.followup.send('Date input was invalid.')
+        await interaction.followup.send('Date input was invalid. Expected format MM/DD/YY')
         return
 
     # Create the embed
