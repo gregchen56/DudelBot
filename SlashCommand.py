@@ -9,6 +9,7 @@ import time
 from datetime import datetime as dt
 import sqlite3
 import requests
+from shutil import copyfile
 
 load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
@@ -25,10 +26,10 @@ ROLE_DICT = {
     SUPPORT_EMOJI : [SUPPORT_ROLE, 1]
 }
 DEFAULT_IMAGE_URLS = {
-    # Event key : [img_path, filename, attachment://filename]
-    'argos' : ['./images/Argos.jpg', 'Argos.jpg', 'attachment://Argos.jpg'],
-    'valtan' : ['./images/Valtan.jpg', 'Valtan.jpg', 'attachment://Valtan.jpg'],
-    'vykas' : ['./images/Vykas2.jpg', 'Vykas2.jpg', 'attachment://Vykas2.jpg']
+    # Event key : img_path
+    'argos' : './images/Argos.jpg',
+    'valtan' : './images/Valtan.jpg',
+    'vykas' : './images/Vykas2.jpg'
 }
 UTC_OFFSETS = {
     'CDT' : '-0500',
@@ -68,6 +69,7 @@ intents = discord.Intents(
     guild_reactions=True,
     guilds=True,
     members=True,
+    message_content=True,
     messages=True,
     reactions=True,
 )
@@ -132,8 +134,10 @@ async def on_raw_reaction_add(payload):
         name=field_name,
         value=signups
     )
+    files = [discord.File(f'./images/events/{payload.message_id}.jpg', filename=f'{payload.message_id}.jpg')]
+    embed.set_image(url=f'attachment://{payload.message_id}.jpg')
 
-    await event_message.edit(embed=embed, attachments=[])
+    await event_message.edit(embed=embed, attachments=files)
     print(f'User ID {payload.user_id} signed up for event ID {payload.message_id} as {ROLE_DICT[payload.emoji.name][0]}')
 
 @client.event
@@ -175,9 +179,23 @@ async def on_raw_reaction_remove(payload):
         name=field_name,
         value=signups
     )
+    files = [discord.File(f'./images/events/{payload.message_id}.jpg', filename=f'{payload.message_id}.jpg')]
+    embed.set_image(url=f'attachment://{payload.message_id}.jpg')
 
-    await event_message.edit(embed=embed, attachments=[])
+    await event_message.edit(embed=embed, attachments=files)
     print(f'User ID {payload.user_id} no longer signed up for event ID {payload.message_id} as {ROLE_DICT[payload.emoji.name][0]}')
+
+@client.event
+async def on_message(message):
+    # The message was sent by the bot. Do nothing.
+    if message.author.id == client.user.id:
+        return
+
+    if message.content.startswith('https://discord'):
+        event_id = int(message.content.split('/')[-1])
+        if (event_id,) in fetch_event_ids():
+            event_message = await get_event_message(client.guild_channels[message.guild.id], event_id)
+            await message.channel.send('Click on the link above for signups!', embed = event_message.embeds[0].copy())
 
 # Custom help command
 @client.tree.command()
@@ -412,45 +430,50 @@ async def create_event(
         name = ' '.join([SUPPORT_ROLE, SUPPORT_EMOJI, '-', '(0)']),
         value = '\u200b'
     )
+        
+    # Send the event in chat.
+    sent_message = await interaction.followup.send(embed=embed)
 
-    # Set event image if one was provided.
-    file = None
+    # Save copy of event image if one was provided.
+    img_decided = False
     if img_url:
         try:
-            image_formats = ('image/png', 'image/jpeg', 'image/jpg', 'image/webp')
+            image_formats = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp']
             r = requests.head(img_url)
-            if r.headers['content-type'] in image_formats:                
+            if r.headers['content-type'] in image_formats:
                 response = requests.get(img_url)
-                with open('./images/temp_img.jpg', 'wb') as f:
+                with open(f'./images/events/{sent_message.id}.jpg', 'wb') as f:
                     f.write(response.content)
-                file = discord.File('./images/temp_img.jpg', filename='temp_img.jpg')
-                embed.set_image(url='attachment://temp_img.jpg')
+                img_decided = True
 
             else:
                 await interaction.user.send('The img_link you passed was valid but was not a direct link to an image. If you would like to retry, delete the event and create another using a direct image link (typically ending in .png or .jpg)')
 
         except requests.exceptions.RequestException:
-            await interaction.user.send('I couldn\'t find an image at the url you specified for the event. I\'ll be making the event without it.')
+            await interaction.user.send('I couldn\'t find an image at the url you specified for the event. I\'ll be using the default image.')
 
-    # If no image provided, try to set a local default image
-    else:
+    # If no image provided, search for a local default image based on the event title.
+    # Make a copy for the event if an image match is found.
+    if not img_decided:
         for key in DEFAULT_IMAGE_URLS:
             if key in title.lower():
-                file = discord.File(DEFAULT_IMAGE_URLS[key][0], filename=DEFAULT_IMAGE_URLS[key][1])
-                embed.set_image(url=DEFAULT_IMAGE_URLS[key][2])
+                copyfile(DEFAULT_IMAGE_URLS[key], f'./images/events/{sent_message.id}.jpg')
+                img_decided = True
                 break
+        
+    # If no image was set based on the event title, create a copy of the constant default image.
+    if not img_decided:
+        copyfile('./images/DudelBot.png', f'./images/events/{sent_message.id}.jpg')
 
-    # Send the event in chat.
-    if file:
-        sent_message = await interaction.followup.send(file=file, embed=embed)
-    else:
-        sent_message = await interaction.followup.send(embed=embed)
-    
+    # Set the event image
+    files = [discord.File(f'./images/events/{sent_message.id}.jpg', filename=f'{sent_message.id}.jpg')]
+    embed.set_image(url=f'attachment://{sent_message.id}.jpg')
+
     # Set footer to the event's message ID
     embed.set_footer(text = f'Event ID: {sent_message.id}')
 
-    # Edit the message to display the newly added footer
-    await interaction.edit_original_response(embed=embed)
+    # Edit the message to display the newly added image and footer
+    await interaction.edit_original_response(embed=embed, attachments=files)
 
     # Store the event details in the database
     insert_event(
@@ -504,6 +527,8 @@ async def end_event(interaction: discord.Interaction, event_id: str):
     delete_event_by_id(event_id)
     event_message = await get_event_message(client.guild_channels[interaction.guild_id], event_id)
     await event_message.delete()
+    if os.path.exists(f'./images/events/{event_id}.jpg'):
+        os.remove(f'./images/events/{event_id}.jpg')
     await interaction.followup.send('Event ended.')
 
 # end_event command error handler
@@ -551,6 +576,8 @@ async def cancel_event(interaction: discord.Interaction, event_id: str):
     delete_event_by_id(event_id)
     event_message = await get_event_message(client.guild_channels[interaction.guild_id], event_id)
     await event_message.delete()
+    if os.path.exists(f'./images/events/{event_id}.jpg'):
+        os.remove(f'./images/events/{event_id}.jpg')
     await interaction.followup.send('Event cancelled.')
 
 # cancel_event command error handler
