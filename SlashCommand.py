@@ -52,7 +52,6 @@ class MyClient(discord.Client):
         self.guild_channels = {}
 
     async def setup_hook(self):
-        self.tree.copy_global_to(guild=MY_GUILD)
         await self.tree.sync(guild=MY_GUILD)
 
 # DudelBot needs the 'bot' scope and the following bot permissions:
