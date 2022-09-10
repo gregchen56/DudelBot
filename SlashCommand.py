@@ -10,6 +10,10 @@ from datetime import datetime as dt
 import sqlite3
 import requests
 
+load_dotenv()
+TOKEN = os.getenv('DISCORD_TOKEN')
+GUILD_ID = os.getenv('GUILD_ID')
+MY_GUILD = discord.Object(id=GUILD_ID)
 DB_PATH = './data/db/DudelBotData.db'
 DPS_EMOJI = '⚔️'
 DPS_ROLE = 'DPS'
@@ -47,11 +51,8 @@ class MyClient(discord.Client):
         self.guild_channels = {}
 
     async def setup_hook(self):
-        # self.tree.copy_global_to(guild=MY_GUILD)
-        # await self.tree.sync(guild=MY_GUILD)
-        # self.tree.copy_global_to(guild=FREE_CANDY)
-        # await self.tree.sync(guild=FREE_CANDY)
-        await self.tree.sync()
+        self.tree.copy_global_to(guild=MY_GUILD)
+        await self.tree.sync(guild=MY_GUILD)
 
 # DudelBot needs the 'bot' scope and the following bot permissions:
 #   Read Messages/View Channels
@@ -362,15 +363,15 @@ async def set_events_channel_error_handler(interaction: discord.Interaction, err
     Choice(name='UTC/GMT - Coordinated Universal Time', value='UTC/GMT'),
 ])
 async def create_event(
-    interaction: discord.Interaction,
-    title: str,
-    day: str,
-    hour: Literal['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12'],
-    minute: Literal['00', '15', '30', '45'],
-    am_pm: Literal['am', 'pm'],
-    timezone: Optional[Choice[str]],
-    img_url: Optional[str]
-    ):
+        interaction: discord.Interaction,
+        title: str,
+        day: str,
+        hour: Literal['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12'],
+        minute: Literal['00', '15', '30', '45'],
+        am_pm: Literal['am', 'pm'],
+        timezone: Optional[Choice[str]],
+        img_url: Optional[str]
+        ):
     '''Creates an event with you as the host.'''
     await interaction.response.defer()
 
@@ -390,6 +391,7 @@ async def create_event(
         e_datetime = dt.strptime(' '.join([day, hour, minute, am_pm, utc_offset]), '%m/%d/%y %I %M %p %z')
     except ValueError:
         await interaction.followup.send('Date input was invalid. Expected format MM/DD/YY')
+        log_error()
         return
 
     # Create the embed
@@ -415,11 +417,17 @@ async def create_event(
     file = None
     if img_url:
         try:
-            response = requests.get(img_url)
-            with open('./images/temp_img.jpg', 'wb') as f:
-                f.write(response.content)
-            file = discord.File('./images/temp_img.jpg', filename='temp_img.jpg')
-            embed.set_image(url='attachment://temp_img.jpg')
+            image_formats = ('image/png', 'image/jpeg', 'image/jpg', 'image/webp')
+            r = requests.head(img_url)
+            if r.headers['content-type'] in image_formats:                
+                response = requests.get(img_url)
+                with open('./images/temp_img.jpg', 'wb') as f:
+                    f.write(response.content)
+                file = discord.File('./images/temp_img.jpg', filename='temp_img.jpg')
+                embed.set_image(url='attachment://temp_img.jpg')
+
+            else:
+                await interaction.user.send('The img_link you passed was valid but was not a direct link to an image. If you would like to retry, delete the event and create another using a direct image link (typically ending in .png or .jpg)')
 
         except requests.exceptions.RequestException:
             await interaction.user.send('I couldn\'t find an image at the url you specified for the event. I\'ll be making the event without it.')
@@ -1074,6 +1082,4 @@ def log_message(message):
     f.write('\n\n')
     f.close()
 
-load_dotenv()
-token = os.getenv('DISCORD_TOKEN')
-client.run(token)
+client.run(TOKEN)
