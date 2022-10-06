@@ -1,0 +1,5 @@
+# ignore .env files
+*.env
+
+# ignore ALL files in ANY directory named __pycache__
+__pycache__/
