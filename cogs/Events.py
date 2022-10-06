@@ -653,18 +653,11 @@ class Events(commands.Cog):
             self.log_message(f'User {interaction.user.id} tried to limit signups for event {event_id} but is not the host!')
             return
         
-        # Insert the limits into the event database
         role_limits = {self.dps_role : [dps_limit, self.dps_emoji], self.support_role : [support_limit, self.support_emoji]}
-        self.insert_event_limits(event_id, role_limits[self.dps_role][0], role_limits[self.support_role][0])
-
         field_names = []
         removed_members = []
         for role in role_limits:
             signup_count = len(self.fetch_event_role_signup_info(event_id, role))
-            
-            # Check to see if current role signups are higher than the limit.
-            if signup_count > role_limits[role][0]:
-                removed_members.append((self.delete_latest_n_role_signups(event_id, role, signup_count-role_limits[role][0]), role))
 
             # User does not want a DPS/Support limit
             if role_limits[role][0] == -1:
@@ -680,8 +673,13 @@ class Events(commands.Cog):
                     )
                 )
 
-            # Show signup count versus sign up limit per role
+            # User specified a DPS/Support limit
             else:
+                # Check to see if current role signups are higher than the limit.
+                if signup_count > role_limits[role][0]:
+                    removed_members.append((self.delete_latest_n_role_signups(event_id, role, signup_count-role_limits[role][0]), role))
+
+                # Show signup count versus sign up limit per role
                 field_names.append(
                     ' '.join(
                         [
@@ -706,7 +704,7 @@ class Events(commands.Cog):
             name=field_names[1],
             value=embed.fields[1].value
         )
-        await event_message.edit(embed=embed, attachments=[])
+        await event_message.edit(embed=embed)
 
         # Remove excess signups. removed_members is a list of up to 2 tuples. Each tuple
         # is in the form of ([], str). The list in the first index is a list of tuples.
@@ -717,6 +715,9 @@ class Events(commands.Cog):
                 user = self.bot.get_user(item[1])
                 await event_message.remove_reaction(role_limits[tuple[1]][1], user)
                 await user.send(f'You have been removed from `{event_info[4]}` on <t:{event_info[3]}> because the host has added signup limits for your role.')
+
+        # Insert the limits into the event database
+        self.insert_event_limits(event_id, role_limits[self.dps_role][0], role_limits[self.support_role][0])
 
         # Alert the user.
         await interaction.followup.send(f'Your event now has a DPS limit of [{role_limits[self.dps_role][0]}] and a support limit of [{role_limits[self.support_role][0]}]. Any additional signups have been removed.')
