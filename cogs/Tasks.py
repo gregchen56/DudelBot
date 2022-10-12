@@ -11,7 +11,6 @@ class Tasks(commands.Cog):
         self.event_done_checker.start()
 
     def cog_unload(self):
-        print('Tasks unloaded')
         self.event_done_checker.cancel()
 
     @tasks.loop(hours=1.0)
@@ -69,25 +68,24 @@ class EventDoneView(discord.ui.View):
         channel_id = self.events.get_guild_channel_id(event_info[7])
         event_message = await self.events.get_event_message(channel_id[0], self.event_id)
         await event_message.delete()
-        self.events.delete_os_event_image(self.event_id)
 
     async def on_timeout(self):
-        await self.end_event()
         await self.disable_buttons()
+        await self.end_event()
 
     @discord.ui.button(style= discord.ButtonStyle.green, label='Yes')
     async def yes_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.defer(ephemeral=True)
-        await self.end_event()
         await self.disable_buttons()
         self.stop() # explicitly stop listening to interaction events. on_timeout will not be called.
+        await self.end_event()
         await interaction.followup.send('Event ended.')
 
     @discord.ui.button(style= discord.ButtonStyle.red, label='No')
     async def no_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        self.events.set_no_auto_delete(self.event_id, 'True')
         await self.disable_buttons()
         self.stop() # explicitly stop listening to interaction events. on_timeout will not be called.
+        self.events.set_no_auto_delete(self.event_id, 'True')
         await interaction.response.send_message('Okay. I won\'t delete this event')
         
         event_info = self.events.get_event_info(self.event_id)

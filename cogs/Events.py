@@ -4,15 +4,15 @@ from discord.ext import commands
 from discord.app_commands import Choice
 from typing import Literal, Optional
 from dotenv import load_dotenv
-import os
 import traceback
 import time
-from datetime import datetime as dt
+import datetime
 import sqlite3
-import requests
+import aiohttp
 from shutil import copyfile
 import asyncio
 import Exceptions
+from io import BytesIO
 
 class Events(commands.Cog):
     def __init__(self, bot: commands.Bot) -> None:
@@ -28,11 +28,11 @@ class Events(commands.Cog):
         }
         self.default_image_urls = {
             # Event key : img_path
-            'argos' : './images/Argos.jpg',
-            'clown' : './images/KakulSaydon.jpg',
-            'kakul' : './images/KakulSaydon.jpg',
-            'valtan' : './images/Valtan.jpg',
-            'vykas' : './images/Vykas2.jpg'
+            'argos' : ['https://cdn.discordapp.com/attachments/1025962764788830238/1025962949954768916/Argos.jpg', './images/Argos.jpg'],
+            'clown' : ['https://cdn.discordapp.com/attachments/1025962764788830238/1025962950651035728/KakulSaydon.jpg', './images/KakulSaydon.jpg'],
+            'kakul' : ['https://cdn.discordapp.com/attachments/1025962764788830238/1025962950651035728/KakulSaydon.jpg', './images/KakulSaydon.jpg'],
+            'valtan' : ['https://cdn.discordapp.com/attachments/1025962764788830238/1025962950994960455/Valtan.jpg', './images/Valtan.jpg'],
+            'vykas' : ['https://cdn.discordapp.com/attachments/1025962764788830238/1025962951317930054/Vykas2.jpg', './images/Vykas2.jpg']
         }
         self.utc_offets = {
             'CDT' : '-0500',
@@ -100,7 +100,7 @@ class Events(commands.Cog):
                 payload.member.display_name,
                 payload.member.id,
                 role,
-                int(dt.now().timestamp())
+                int(datetime.datetime.now().timestamp())
             )
             result = self.fetch_event_role_signup_info(event_message.id, role)
             signups = '\n'.join(map(lambda x: f'<@{x[2]}>', result))
@@ -111,13 +111,7 @@ class Events(commands.Cog):
                 value=signups
             )
 
-            if requests.head(embed.image.url).status_code == 200:
-                await event_message.edit(embed=embed, attachments=[])
-
-            else:
-                files = [discord.File(f'./images/events/{payload.message_id}.jpg', filename=f'{payload.message_id}.jpg')]
-                embed.set_image(url=f'attachment://{payload.message_id}.jpg')
-                await event_message.edit(embed=embed, attachments=files)
+            await event_message.edit(embed=embed)
 
         print(f'User ID {payload.user_id} signed up for event ID {payload.message_id} as {self.role_dict[payload.emoji.name][0]}')
 
@@ -162,13 +156,8 @@ class Events(commands.Cog):
                 name=field_name,
                 value=signups
             )
-            if requests.head(embed.image.url).status_code == 200:
-                await event_message.edit(embed=embed, attachments=[])
-
-            else:
-                files = [discord.File(f'./images/events/{payload.message_id}.jpg', filename=f'{payload.message_id}.jpg')]
-                embed.set_image(url=f'attachment://{payload.message_id}.jpg')
-                await event_message.edit(embed=embed, attachments=files)
+            
+            await event_message.edit(embed=embed)
 
         print(f'User ID {payload.user_id} no longer signed up for event ID {payload.message_id} as {self.role_dict[payload.emoji.name][0]}')
 
@@ -184,6 +173,21 @@ class Events(commands.Cog):
                 event_message = await self.get_event_message(self.bot.guild_channels[message.guild.id], event_id)
                 await message.channel.send('Click on the link above for signups!', embed = event_message.embeds[0].copy())
     
+    @commands.Cog.listener()
+    async def on_scheduled_event_user_add(self, event, user):
+        scheduled_event_ids = self.fetch_scheduled_event_ids()
+        if (event.id,) in scheduled_event_ids:
+            event_link = event.description.split('\n')[-1]
+            embed = discord.Embed(
+                color=discord.Color.purple(),
+                title="**Thanks for interesting in a DudelBot event!**",
+                description=(
+                    "Interest in the Discord scheduled event does not sign you up for the event.\n"
+                    f"Please [Click Here]({event_link}) to confirm your registration for {event.name}."
+                )
+            )
+            await user.send(embed=embed)
+
     # Custom help command
     @app_commands.command()
     async def help(self, interaction: discord.Interaction):
@@ -368,6 +372,7 @@ class Events(commands.Cog):
             minute: Literal['00', '15', '30', '45'],
             am_pm: Literal['am', 'pm'],
             timezone: Optional[Choice[str]],
+            image: Optional[discord.Attachment],
             img_url: Optional[str]
             ):
         '''Creates an event with you as the host.'''
@@ -378,6 +383,11 @@ class Events(commands.Cog):
             await interaction.followup.send('Title can only be up to 256 characters long.')
             return
 
+        # Check to see if user input both an image and an image_url
+        if image and img_url:
+            await interaction.followup.send('Please specify either an image upload or an image url, not both.')
+            return
+
         # Parse the date and time entered by the user
         if timezone:
             utc_offset = self.utc_offets[timezone.value]
@@ -386,15 +396,15 @@ class Events(commands.Cog):
         else:
             utc_offset = self.utc_offets['PST']
         try:
-            e_datetime = dt.strptime(' '.join([day, hour, minute, am_pm, utc_offset]), '%m/%d/%y %I %M %p %z')
+            e_datetime = datetime.datetime.strptime(' '.join([day, hour, minute, am_pm, utc_offset]), '%m/%d/%y %I %M %p %z')
         except ValueError:
             await interaction.followup.send('Date input was invalid. Expected format MM/DD/YY')
-            self.log_error()
+            self.bot.log_error()
             return
 
         # Create the embed
         descr = f'''Host: {interaction.user.display_name}\n
-                🕙 <t:{int(e_datetime.timestamp())}>\n\u200b'''
+                🕙 {discord.utils.format_dt(e_datetime, style='f')}\n\u200b'''
         embed = discord.Embed(
             title = title,
             description = descr,
@@ -410,51 +420,78 @@ class Events(commands.Cog):
             name = ' '.join([self.support_role, self.support_emoji, '-', '(0)']),
             value = '\u200b'
         )
-            
-        # Send the event in chat.
-        sent_message = await interaction.followup.send(embed=embed)
 
-        # Save copy of event image if one was provided.
+        # Check if img_url is a valid link to an image
         img_decided = False
-        if img_url:
+
+        if image:
+            embed.set_image(url=image.url)
+            image_bytes = await image.read()
+            img_decided = True
+
+        elif img_url:
             try:
                 image_formats = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp']
-                r = requests.head(img_url)
-                if r.headers['content-type'] in image_formats:
-                    response = requests.get(img_url)
-                    with open(f'./images/events/{sent_message.id}.jpg', 'wb') as f:
-                        f.write(response.content)
-                    img_decided = True
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(img_url, timeout=10) as response:
+                        if response.headers['content-type'] in image_formats:
+                            embed.set_image(url=img_url)
+                            content = await response.content.read()
+                            image_bytes = bytearray(content)
+                            img_decided = True
 
-                else:
-                    await interaction.user.send('The img_link you passed was valid but was not a direct link to an image. If you would like to retry, delete the event and create another using a direct image link (typically ending in .png or .jpg)')
+                        else:
+                            await interaction.user.send("The img_link you passed was not a direct link to an image. If you would like to retry, delete the event and create another using a direct image link (typically ending in .png or .jpg)")
+                            
+            except asyncio.exceptions.TimeoutError:
+                await interaction.user.send("Couldn't reach img_url - using default image instead.")
 
-            except requests.exceptions.RequestException:
-                await interaction.user.send('I couldn\'t find an image at the url you specified for the event. I\'ll be using the default image.')
-
-        # If no image provided, search for a local default image based on the event title.
-        # Make a copy for the event if an image match is found.
+        # If no image provided, search for a default image based on the event title.
         if not img_decided:
             for key in self.default_image_urls:
                 if key in title.lower():
-                    copyfile(self.default_image_urls[key], f'./images/events/{sent_message.id}.jpg')
+                    embed.set_image(url=self.default_image_urls[key][0])
+                    with open(self.default_image_urls[key][1], 'rb') as file:
+                        image_bytes = bytearray(file.read())
                     img_decided = True
                     break
             
-        # If no image was set based on the event title, create a copy of the constant default image.
+        # If no image was set based on the event title, use the constant default image.
         if not img_decided:
-            copyfile('./images/DudelBot.png', f'./images/events/{sent_message.id}.jpg')
+            embed.set_image(url='https://cdn.discordapp.com/attachments/1025962764788830238/1025962950198042704/DudelBot.png')
+            with open('./images/DudelBot.png', 'rb') as file:
+                image_bytes = bytearray(file.read())
 
-        # Set the event image
-        files = [discord.File(f'./images/events/{sent_message.id}.jpg', filename=f'{sent_message.id}.jpg')]
-        embed.set_image(url=f'attachment://{sent_message.id}.jpg')
+        # Send the event in chat.
+        sent_message = await interaction.followup.send(embed=embed)
 
         # Set footer to the event's message ID
         embed.set_footer(text = f'Event ID: {sent_message.id}')
 
-        # Edit the message to display the newly added image and footer
-        await interaction.edit_original_response(embed=embed, attachments=files)
+        # Edit the message to display the footer
+        await interaction.edit_original_response(embed=embed)
 
+        # Add signup reactions for DPS and Support
+        await sent_message.add_reaction(self.dps_emoji)
+        await sent_message.add_reaction(self.support_emoji)
+
+        description = (
+            f"**Host:** <@{interaction.user.id}>"
+            f"        🕙 {discord.utils.format_dt(e_datetime, style='R')}"
+            "\n\u200b\n"
+            f"**Sign up here:**\n{sent_message.jump_url}"
+        )
+
+        # Create the scheduled event
+        scheduled_event = await interaction.guild.create_scheduled_event(
+            name=title,
+            description=description,
+            start_time=e_datetime,
+            end_time=e_datetime + datetime.timedelta(hours=1),
+            location=f"<#{self.bot.guild_channels[interaction.guild_id]}>",
+            image=image_bytes
+        )
+        
         # Store the event details in the database
         self.insert_event(
             sent_message.id,
@@ -462,12 +499,9 @@ class Events(commands.Cog):
             interaction.user.id,
             int(e_datetime.timestamp()),
             title,
-            interaction.guild_id
+            interaction.guild_id,
+            scheduled_event.id
         )
-
-        # Add signup reactions for DPS and Support
-        await sent_message.add_reaction(self.dps_emoji)
-        await sent_message.add_reaction(self.support_emoji)
 
     @app_commands.command()
     @app_commands.default_permissions(manage_events=True)
@@ -496,7 +530,10 @@ class Events(commands.Cog):
         self.delete_event_by_id(event_id)
         event_message = await self.get_event_message(self.bot.guild_channels[interaction.guild_id], event_id)
         await event_message.delete()
-        self.delete_os_event_image(event_id)
+        scheduled_event = interaction.guild.get_scheduled_event(event_info[9])
+        if scheduled_event:
+            await scheduled_event.delete()
+
         await interaction.followup.send('Event ended.')
     
     @app_commands.command()
@@ -528,7 +565,10 @@ class Events(commands.Cog):
         self.delete_event_by_id(event_id)
         event_message = await self.get_event_message(self.bot.guild_channels[interaction.guild_id], event_id)
         await event_message.delete()
-        self.delete_os_event_image(event_id)
+        scheduled_event = interaction.guild.get_scheduled_event(event_info[9])
+        if scheduled_event:
+            await scheduled_event.cancel()
+
         await interaction.followup.send('Event cancelled.')
 
     @app_commands.command()
@@ -541,7 +581,18 @@ class Events(commands.Cog):
                 embed = event_message.embeds[0]
                 embed.title = title
                 self.set_db_event_title(event_id, title)
-                await event_message.edit(attachments=[], embed=embed)
+                await event_message.edit(embed=embed)
+                event_info = self.get_event_info(event_id)
+                scheduled_event = interaction.guild.get_scheduled_event(event_info[9])
+                if scheduled_event:
+                    await scheduled_event.edit(
+                        name=title,
+                        description=scheduled_event.description,
+                        start_time=scheduled_event.start_time,
+                        end_time=scheduled_event.end_time,
+                        location=scheduled_event.location
+                    )
+
                 await interaction.followup.send('Done')
             else:
                 await interaction.followup.send('Title can only be up to 256 characters long.')
@@ -560,7 +611,7 @@ class Events(commands.Cog):
                 embed = event_message.embeds[0]
                 cur_desc = embed.description.split('\u200b')[0]
                 embed.description = '\u200b'.join([cur_desc, '\n', description, '\n\u200b'])
-                await event_message.edit(attachments=[], embed=embed)
+                await event_message.edit(embed=embed)
                 await interaction.followup.send('Done')
             else:
                 await interaction.followup.send('Description can only be up to 4096 characters long.')
@@ -603,7 +654,7 @@ class Events(commands.Cog):
             else:
                 utc_offset = self.utc_offets['PST']
             try:
-                e_datetime = dt.strptime(' '.join([day, hour, minute, am_pm, utc_offset]), '%m/%d/%y %I %M %p %z')
+                e_datetime = datetime.datetime.strptime(' '.join([day, hour, minute, am_pm, utc_offset]), '%m/%d/%y %I %M %p %z')
             except ValueError:
                 await interaction.followup.send('Date input was invalid.')
                 return
@@ -612,10 +663,20 @@ class Events(commands.Cog):
             embed = event_message.embeds[0]
             cur_desc = '\u200b'.join(embed.description.split('\u200b')[1:])
             new_time = f'''Host: {interaction.user.display_name}\n
-                        🕙 <t:{int(e_datetime.timestamp())}>\n\u200b'''
+                        🕙 {discord.utils.format_dt(e_datetime, style='f')}\n\u200b'''
             embed.description = ''.join([new_time, cur_desc])
             self.set_db_event_timestamp(event_id, int(e_datetime.timestamp()))
-            await event_message.edit(attachments=[], embed=embed)
+            await event_message.edit(embed=embed)
+            event_info = self.get_event_info(event_id)
+            scheduled_event = interaction.guild.get_scheduled_event(event_info[9])
+            if scheduled_event:
+                await scheduled_event.edit(
+                    name=scheduled_event.name,
+                    description=scheduled_event.description,
+                    start_time=e_datetime,
+                    end_time=e_datetime + datetime.timedelta(hours=1),
+                    location=scheduled_event.location
+                )
             await interaction.followup.send('Done')
 
         else:
@@ -749,7 +810,7 @@ class Events(commands.Cog):
 
         player_ids = self.fetch_event_signup_distinct_player_ids(event_id)
         event_info = self.get_event_info(event_id)
-        mentions = ' '.join([f'<@!{id[0]}>' for id in player_ids])
+        mentions = ' '.join([f'<@{id[0]}>' for id in player_ids])
         message = ' '.join([
             f'{interaction.user.display_name} is reminding',
             mentions,
@@ -883,6 +944,14 @@ class Events(commands.Cog):
 
         return result
 
+    def fetch_scheduled_event_ids(self):
+        con = sqlite3.connect(self.bot.db_path)
+        cur = con.cursor()
+        result = cur.execute("SELECT scheduled_event_id FROM events").fetchall()
+        con.close()
+
+        return result
+
     def set_no_auto_delete(self, event_id, value):
         con = sqlite3.connect(self.bot.db_path)
         cur = con.cursor()
@@ -904,12 +973,12 @@ class Events(commands.Cog):
         con.commit()
         con.close()
         
-    def insert_event(self, event_id, user_name, user_id, unix_timestamp, title, guild_id):
+    def insert_event(self, event_id, user_name, user_id, unix_timestamp, title, guild_id, schdl_event_id):
         con = sqlite3.connect(self.bot.db_path)
         cur = con.cursor()
         cur.execute(
-            "INSERT INTO events VALUES (?, ?, ?, ?, ?, NULL, NULL, ?, NULL)", 
-            (int(event_id), user_name, user_id, unix_timestamp, title, guild_id)
+            "INSERT INTO events VALUES (?, ?, ?, ?, ?, NULL, NULL, ?, NULL, ?)", 
+            (int(event_id), user_name, user_id, unix_timestamp, title, guild_id, schdl_event_id)
         )
         con.commit()
         con.close()
@@ -942,10 +1011,6 @@ class Events(commands.Cog):
         cur.execute("DELETE FROM events WHERE event_id=?",(int(event_id),))
         con.commit()
         con.close()
-
-    def delete_os_event_image(self, event_id):
-        if os.path.exists(f'./images/events/{event_id}.jpg'):
-            os.remove(f'./images/events/{event_id}.jpg')
 
     def delete_user_from_signups(self, event_id, user_id):
         con = sqlite3.connect(self.bot.db_path)
@@ -1010,7 +1075,7 @@ class Events(commands.Cog):
 
     def log_error(self):
         f = open('./logs/exception_log.log', 'a')
-        f.write(dt.now().strftime('%b/%d/%y - %I:%M:%S %p'))
+        f.write(datetime.datetime.now().strftime('%b/%d/%y - %I:%M:%S %p'))
         f.write('\n')
         f.write(traceback.format_exc())
         f.write('\n\n')
@@ -1018,7 +1083,7 @@ class Events(commands.Cog):
 
     def log_message(self, message):
         f = open('./logs/message_log.log', 'a')
-        f.write(dt.now().strftime('%b/%d/%y - %I:%M:%S %p'))
+        f.write(datetime.datetime.now().strftime('%b/%d/%y - %I:%M:%S %p'))
         f.write('\n')
         f.write(str(message))
         f.write('\n\n')
