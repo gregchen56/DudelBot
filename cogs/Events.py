@@ -29,6 +29,7 @@ class Events(commands.Cog):
         self.default_image_urls = {
             # Event key : img_path
             'argos' : ['https://cdn.discordapp.com/attachments/1025962764788830238/1025962949954768916/Argos.jpg', './images/Argos.jpg'],
+            'brel' : ['https://cdn.discordapp.com/attachments/1025962764788830238/1030203916635344906/Brelshaza.png','./images/Brelshaza.png'],
             'clown' : ['https://cdn.discordapp.com/attachments/1025962764788830238/1025962950651035728/KakulSaydon.jpg', './images/KakulSaydon.jpg'],
             'kakul' : ['https://cdn.discordapp.com/attachments/1025962764788830238/1025962950651035728/KakulSaydon.jpg', './images/KakulSaydon.jpg'],
             'valtan' : ['https://cdn.discordapp.com/attachments/1025962764788830238/1025962950994960455/Valtan.jpg', './images/Valtan.jpg'],
