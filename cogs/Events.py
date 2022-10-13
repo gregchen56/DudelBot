@@ -482,26 +482,43 @@ class Events(commands.Cog):
             f"**Sign up here:**\n{sent_message.jump_url}"
         )
 
-        # Create the scheduled event
-        scheduled_event = await interaction.guild.create_scheduled_event(
-            name=title,
-            description=description,
-            start_time=e_datetime,
-            end_time=e_datetime + datetime.timedelta(hours=1),
-            location=f"<#{self.bot.guild_channels[interaction.guild_id]}>",
-            image=image_bytes
-        )
+        # Create the scheduled event if the event 
+        # start time is in the future
+        tdelta = e_datetime - discord.utils.utcnow()
+        if tdelta.days >= 0:
+            scheduled_event = await interaction.guild.create_scheduled_event(
+                name=title,
+                description=description,
+                start_time=e_datetime,
+                end_time=e_datetime + datetime.timedelta(hours=1),
+                location=f"<#{self.bot.guild_channels[interaction.guild_id]}>",
+                image=image_bytes
+            )
         
-        # Store the event details in the database
-        self.insert_event(
-            sent_message.id,
-            interaction.user.display_name,
-            interaction.user.id,
-            int(e_datetime.timestamp()),
-            title,
-            interaction.guild_id,
-            scheduled_event.id
-        )
+            # Store the event details in the database
+            # with scheduled_event id
+            self.insert_event(
+                sent_message.id,
+                interaction.user.display_name,
+                interaction.user.id,
+                int(e_datetime.timestamp()),
+                title,
+                interaction.guild_id,
+                scheduled_event.id
+            )
+        
+        else:
+            # Store the event details in the database
+            # with no scheduled_event id
+            self.insert_event(
+                sent_message.id,
+                interaction.user.display_name,
+                interaction.user.id,
+                int(e_datetime.timestamp()),
+                title,
+                interaction.guild_id,
+                None
+            )
 
     @app_commands.command()
     @app_commands.default_permissions(manage_events=True)
