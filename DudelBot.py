@@ -162,23 +162,29 @@ async def clear(interaction: discord.Interaction):
 
 @bot.tree.error
 async def on_app_command_error(interaction: discord.Interaction, error: Exception):
-    await interaction.response.defer()
+    # await interaction.response.defer()
     if isinstance(error, Exceptions.UserNotDev):
-        await interaction.followup.send('You are not a dev.')
+        await interaction.response.send_message('You are not a dev.')
 
     elif isinstance(error, app_commands.MissingPermissions):
         missing_perms = '\n'.join(error.missing_permissions)
         bot.log_message(f'User ID: {interaction.user.id} ran the {interaction.command.name} command but is missing these permissions:{error.missing_permissions}')
-        await interaction.followup.send(f'You are missing the following permissions:\n>>> {missing_perms}', ephemeral=True)
-    
+        await interaction.response.send_message(f'You are missing the following permissions:\n>>> {missing_perms}', ephemeral=True)
+
+    elif isinstance(error, app_commands.BotMissingPermissions):
+        missing_perms = '\n'.join(error.missing_permissions)
+        bot.log_message(f'User ID: {interaction.user.id} ran the {interaction.command.name} command but DudelBot is missing these permissions:{error.missing_permissions}')
+        await interaction.response.send_message(f'DudelBot is missing the following permissions:\n>>> {missing_perms}', ephemeral=True)
+
     elif isinstance(error, Exceptions.EventChannelNotSet):
         bot.log_message(f'User ID: {interaction.user.id} ran the {interaction.command.name} command but the event channel is not set.')
-        await interaction.followup.send('Event channel is not set. Please have someone with the [Manage Events] permission run the /set_events_channel command', ephemeral=True)
+        await interaction.response.send_message('Event channel is not set. Please have someone with the [Manage Events] permission run the /set_events_channel command', ephemeral=True)
 
     else:
-        await interaction.followup.send('Something went wrong :(. Doodle would appreciate if you let him know about this.', ephemeral=True)
+        await interaction.response.send_message('Something went wrong :(. Doodle would appreciate if you let him know about this.', ephemeral=True)
         bot.log_error()
-        raise error
+        # Reraising the error causes this method to run again
+        # raise error
 
 bot.run(token)
 

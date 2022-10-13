@@ -867,6 +867,7 @@ class Events(commands.Cog):
             self.log_message(f'User {interaction.user.id} tried to remove member {member.id} from event {event_id} but is not the host!')
 
     @app_commands.command()
+    @app_commands.checks.bot_has_permissions(send_messages=True)
     async def send_signup_reminder(self, interaction: discord.Interaction, event_id: str):
         await interaction.response.defer()
         event_id = int(event_id)
