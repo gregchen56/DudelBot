@@ -590,6 +590,7 @@ class Events(commands.Cog):
                         description=scheduled_event.description,
                         start_time=scheduled_event.start_time,
                         end_time=scheduled_event.end_time,
+                        image=scheduled_event.cover_image,
                         location=scheduled_event.location
                     )
 
@@ -619,6 +620,67 @@ class Events(commands.Cog):
         else:
             await interaction.followup.send('You cannot edit events where you are not the host.')
             self.log_message(f'User {interaction.user.id} tried to edit description of event {event_id} but is not the host!')
+
+    @app_commands.command()
+    @app_commands.default_permissions(manage_events=True)
+    @app_commands.describe(
+        image="A local image you want to upload as the event's display image.",
+        img_url="A direct link to an image that you want to set as the event's dislay image."
+    )
+    async def edit_image(self, interaction: discord.Interaction, event_id: str, image: Optional[discord.Attachment], img_url: Optional[str]):
+        """Define a new image or image url for an event. USE EITHER image OR img_url."""
+        await interaction.response.defer(ephemeral=True)
+
+        # Check to see if user input both an image and an image_url
+        if image and img_url:
+            await interaction.followup.send('Please specify either an image upload or an image url, not both.')
+            return
+
+        # Check to see if user used the command without specify either an image or an image_url:
+        if not (image or img_url):
+            await interaction.followup.send('Please specify either an image upload or an image url.')
+            return
+
+        event_message = await self.get_event_message(self.bot.guild_channels[interaction.guild_id], event_id)
+
+        if image:
+            event_message.embeds[0].set_image(url=image.url)
+            image_bytes = await image.read()
+
+        elif img_url:
+            try:
+                image_formats = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp']
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(img_url, timeout=10) as response:
+                        if response.headers['content-type'] in image_formats:
+                            event_message.embeds[0].set_image(url=img_url)
+                            content = await response.content.read()
+                            image_bytes = bytearray(content)
+
+                        else:
+                            await interaction.user.send((
+                                "The img_link you passed was not a direct link to an image. "
+                                "If you would like to retry, delete the event and create another "
+                                "using a direct image link (typically ending in .png or .jpg)"
+                            ))
+                            
+            except asyncio.exceptions.TimeoutError:
+                await interaction.user.send("Couldn't reach img_url.")
+                return
+
+        await event_message.edit(embed=event_message.embeds[0])
+        event_info = self.get_event_info(event_id)
+        scheduled_event = interaction.guild.get_scheduled_event(event_info[9])
+        await scheduled_event.edit(
+            name=scheduled_event.name,
+            description=scheduled_event.description,
+            start_time=scheduled_event.start_time,
+            end_time=scheduled_event.end_time,
+            image=image_bytes,
+            location=scheduled_event.location
+        )
+
+        await interaction.followup.send("Done")
 
     @app_commands.command()
     @app_commands.default_permissions(manage_events=True)
@@ -675,6 +737,7 @@ class Events(commands.Cog):
                     description=scheduled_event.description,
                     start_time=e_datetime,
                     end_time=e_datetime + datetime.timedelta(hours=1),
+                    image=scheduled_event.cover_image,
                     location=scheduled_event.location
                 )
             await interaction.followup.send('Done')

@@ -88,7 +88,7 @@ def is_dev(interaction: discord.Interaction):
             return True
 
 # Sync
-@bot.tree.command(guild=dev_guild)
+@bot.tree.command()
 @app_commands.check(is_dev)
 async def sync(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
@@ -96,7 +96,7 @@ async def sync(interaction: discord.Interaction):
     await interaction.followup.send('Synced. Commands can take up to an hour to show up. Please be patient if you do not see your commands right away.')
 
 # Guild Sync
-@bot.tree.command(name='guildsync', guild=dev_guild)
+@bot.tree.command(name='guildsync')
 @app_commands.check(is_dev)
 async def guild_sync(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
@@ -152,6 +152,13 @@ async def loaded_extensions(interaction: discord.Interaction):
     else:
         # >>> followed by a space to create a multi-line block quote
         await interaction.followup.send(f'The following extensions are loaded:\n>>> {cog_names}')
+
+# Print a bunch of new lines to clear the terminal
+@bot.tree.command(name='clear', guild=dev_guild)
+@app_commands.check(is_dev)
+async def clear(interaction: discord.Interaction):
+    print("\n\n\n\n\n\n\n\n\n\n")
+    await interaction.response.send_message("Done", ephemeral=True)
 
 @bot.tree.error
 async def on_app_command_error(interaction: discord.Interaction, error: Exception):
