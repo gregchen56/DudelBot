@@ -1,3 +1,4 @@
+from multiprocessing import Event
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -9,10 +10,9 @@ import time
 import datetime
 import sqlite3
 import aiohttp
-from shutil import copyfile
 import asyncio
 import Exceptions
-from io import BytesIO
+import DatabaseFunctions as dbfunc
 
 class Events(commands.Cog):
     def __init__(self, bot: commands.Bot) -> None:
@@ -59,124 +59,10 @@ class Events(commands.Cog):
         self.remove_signup.add_check(self.is_event_channel_set)
         self.my_signups.add_check(self.is_event_channel_set)
         self.player_signups.add_check(self.is_event_channel_set)
-
-    @commands.Cog.listener()
-    async def on_raw_reaction_add(self, payload):
-        # The reaction was done by the bot. Do nothing.
-        if payload.member.id == self.bot.user.id:
-            return
-
-        # Only respond to the desginated DPS and Support emojis.
-        if payload.emoji.name != self.dps_emoji and payload.emoji.name != self.support_emoji:
-            return
-
-        # Reaction was a DPS or Support emoji, but was not intended for an event signup.
-        if (payload.message_id,) not in self.fetch_event_ids():
-            return
-
-        role = self.role_dict[payload.emoji.name][0]
-        if role == self.dps_role:
-            signup_limit = self.get_event_info(payload.message_id)[5]
-        elif role == self.support_role:
-            signup_limit = self.get_event_info(payload.message_id)[6]
-
-        # TODO confirm if this is correct
-        async with self.lock:
-            signup_count = len(self.fetch_event_role_signup_info(payload.message_id, role))
-            event_message = await self.get_event_message(payload.channel_id, payload.message_id)
-            if signup_limit is not None:
-                if signup_limit - 1 < signup_count:
-                    await event_message.remove_reaction(payload.emoji.name, payload.member)
-                    await payload.member.send(f'Unable to add your signup because the host has limited signups for the event to {signup_limit} people.')
-                    return
-
-                field_name = ' '.join([role, payload.emoji.name, '-', f'({signup_count + 1}/{signup_limit})'])
-
-            else:
-                field_name = ' '.join([role, payload.emoji.name, '-', f'({signup_count + 1})'])
-
-            embed = event_message.embeds[0]
-            self.insert_event_signup(
-                payload.message_id,
-                payload.member.display_name,
-                payload.member.id,
-                role,
-                int(datetime.datetime.now().timestamp())
-            )
-            result = self.fetch_event_role_signup_info(event_message.id, role)
-            signups = '\n'.join(map(lambda x: f'<@{x[2]}>', result))
-
-            embed.set_field_at(
-                index=self.role_dict[payload.emoji.name][1],
-                name=field_name,
-                value=signups
-            )
-
-            await event_message.edit(embed=embed)
-
-        print(f'User ID {payload.user_id} signed up for event ID {payload.message_id} as {self.role_dict[payload.emoji.name][0]}')
-
-    @commands.Cog.listener()
-    async def on_raw_reaction_remove(self, payload):
-        # The reaction was done by the bot. Do nothing.
-        if payload.user_id == self.bot.user.id:
-            return
-        # Only respond to the desginated DPS and Support emojis.
-        if payload.emoji.name != self.dps_emoji and payload.emoji.name != self.support_emoji:
-            return
-        # Reaction was a DPS or Support emoji, but was not intended for an event signup.
-        if (payload.message_id,) not in self.fetch_event_ids():
-            return
-
-        # TODO confirm if this is correct
-        async with self.lock:
-            event_message = await self.get_event_message(payload.channel_id, payload.message_id)
-            embed = event_message.embeds[0]
-
-            role = self.role_dict[payload.emoji.name][0]
-            self.delete_role_user_from_signups(event_message.id, payload.user_id, role)
-            if role == self.dps_role:
-                signup_limit = self.get_event_info(payload.message_id)[5]
-            elif role == self.support_role:
-                signup_limit = self.get_event_info(payload.message_id)[6]
-            result = self.fetch_event_role_signup_info(event_message.id, role)
-            signup_count = len(result)
-            if signup_count == 0:
-                signups = '\u200b'
-            else:
-                signups = '\n'.join(map(lambda x: f'<@{x[2]}>', result))
-
-            if signup_limit is not None:
-                field_name = ' '.join([role, payload.emoji.name, '-', f'({signup_count}/{signup_limit})'])
-
-            else:
-                field_name = ' '.join([role, payload.emoji.name, '-', f'({signup_count})'])
-
-            embed.set_field_at(
-                index=self.role_dict[payload.emoji.name][1],
-                name=field_name,
-                value=signups
-            )
-            
-            await event_message.edit(embed=embed)
-
-        print(f'User ID {payload.user_id} no longer signed up for event ID {payload.message_id} as {self.role_dict[payload.emoji.name][0]}')
-
-    @commands.Cog.listener()
-    async def on_message(self, message):
-        # The message was sent by the bot. Do nothing.
-        if message.author.id == self.bot.user.id:
-            return
-
-        if message.content.startswith('https://discord'):
-            event_id = int(message.content.split('/')[-1])
-            if (event_id,) in self.fetch_event_ids():
-                event_message = await self.get_event_message(self.bot.guild_channels[message.guild.id], event_id)
-                await message.channel.send('Click on the link above for signups!', embed = event_message.embeds[0].copy())
     
     @commands.Cog.listener()
     async def on_scheduled_event_user_add(self, event, user):
-        scheduled_event_ids = self.fetch_scheduled_event_ids()
+        scheduled_event_ids = dbfunc.fetch_scheduled_event_ids()
         if (event.id,) in scheduled_event_ids:
             event_link = event.description.split('\n')[-1]
             embed = discord.Embed(
@@ -464,17 +350,16 @@ class Events(commands.Cog):
                 image_bytes = bytearray(file.read())
 
         # Send the event in chat.
-        sent_message = await interaction.followup.send(embed=embed)
+        sent_message = await interaction.followup.send(
+            embed=embed,
+            view=EventView(self)
+        )
 
         # Set footer to the event's message ID
         embed.set_footer(text = f'Event ID: {sent_message.id}')
 
         # Edit the message to display the footer
         await interaction.edit_original_response(embed=embed)
-
-        # Add signup reactions for DPS and Support
-        await sent_message.add_reaction(self.dps_emoji)
-        await sent_message.add_reaction(self.support_emoji)
 
         description = (
             f"**Host:** <@{interaction.user.id}>"
@@ -498,7 +383,7 @@ class Events(commands.Cog):
         
             # Store the event details in the database
             # with scheduled_event id
-            self.insert_event(
+            dbfunc.insert_event(
                 sent_message.id,
                 interaction.user.display_name,
                 interaction.user.id,
@@ -511,7 +396,7 @@ class Events(commands.Cog):
         else:
             # Store the event details in the database
             # with no scheduled_event id
-            self.insert_event(
+            dbfunc.insert_event(
                 sent_message.id,
                 interaction.user.display_name,
                 interaction.user.id,
@@ -530,7 +415,7 @@ class Events(commands.Cog):
     async def end_event(self, interaction: discord.Interaction, event_id: str):
         '''End an event that has concluded.'''
         await interaction.response.defer(ephemeral=True)
-        event_info = self.get_event_info(event_id)
+        event_info = dbfunc.get_event_info(event_id)
 
         if not event_info:
             await interaction.followup.send('Event does not exist')
@@ -541,11 +426,11 @@ class Events(commands.Cog):
             self.log_message(f'User {interaction.user.id} tried to end event {event_id} but is not the event host!')
             return
 
-        player_ids = self.fetch_event_signup_distinct_player_ids(event_id)
+        player_ids = dbfunc.fetch_event_signup_distinct_player_ids(event_id)
         for id in player_ids:
-            self.delete_user_from_signups(event_id, id[0])
+            dbfunc.delete_user_from_signups(event_id, id[0])
 
-        self.delete_event_by_id(event_id)
+        dbfunc.delete_event_by_id(event_id)
         event_message = await self.get_event_message(self.bot.guild_channels[interaction.guild_id], event_id)
         await event_message.delete()
         scheduled_event = interaction.guild.get_scheduled_event(event_info[9])
@@ -563,7 +448,7 @@ class Events(commands.Cog):
     async def cancel_event(self, interaction: discord.Interaction, event_id: str):
         '''Cancel an event that you are hosting. This will also notify all users who are currently signed up.'''
         await interaction.response.defer(ephemeral=True)
-        event_info = self.get_event_info(event_id)
+        event_info = dbfunc.get_event_info(event_id)
 
         if not event_info:
             await interaction.followup.send('Event does not exist')
@@ -574,13 +459,13 @@ class Events(commands.Cog):
             self.log_message(f'User {interaction.user.id} tried to cancel event {event_id} but is not the event host!')
             return
 
-        player_ids = self.fetch_event_signup_distinct_player_ids(event_id)
+        player_ids = dbfunc.fetch_event_signup_distinct_player_ids(event_id)
         for id in player_ids:
             user = await self.bot.fetch_user(id[0])
             await user.send(f'{event_info[1]} has cancelled the event {event_info[4]} on <t:{event_info[3]}>')
-            self.delete_user_from_signups(event_id, id[0])
+            dbfunc.delete_user_from_signups(event_id, id[0])
 
-        self.delete_event_by_id(event_id)
+        dbfunc.delete_event_by_id(event_id)
         event_message = await self.get_event_message(self.bot.guild_channels[interaction.guild_id], event_id)
         await event_message.delete()
         scheduled_event = interaction.guild.get_scheduled_event(event_info[9])
@@ -598,9 +483,9 @@ class Events(commands.Cog):
                 event_message = await self.get_event_message(self.bot.guild_channels[interaction.guild_id], event_id)
                 embed = event_message.embeds[0]
                 embed.title = title
-                self.set_db_event_title(event_id, title)
+                dbfunc.set_db_event_title(event_id, title)
                 await event_message.edit(embed=embed)
-                event_info = self.get_event_info(event_id)
+                event_info = dbfunc.get_event_info(event_id)
                 scheduled_event = interaction.guild.get_scheduled_event(event_info[9])
                 if scheduled_event:
                     await scheduled_event.edit(
@@ -687,7 +572,7 @@ class Events(commands.Cog):
                 return
 
         await event_message.edit(embed=event_message.embeds[0])
-        event_info = self.get_event_info(event_id)
+        event_info = dbfunc.get_event_info(event_id)
         scheduled_event = interaction.guild.get_scheduled_event(event_info[9])
         await scheduled_event.edit(
             name=scheduled_event.name,
@@ -745,9 +630,9 @@ class Events(commands.Cog):
             new_time = f'''Host: {interaction.user.display_name}\n
                         🕙 {discord.utils.format_dt(e_datetime, style='f')}\n\u200b'''
             embed.description = ''.join([new_time, cur_desc])
-            self.set_db_event_timestamp(event_id, int(e_datetime.timestamp()))
+            dbfunc.set_db_event_timestamp(event_id, int(e_datetime.timestamp()))
             await event_message.edit(embed=embed)
-            event_info = self.get_event_info(event_id)
+            event_info = dbfunc.get_event_info(event_id)
             scheduled_event = interaction.guild.get_scheduled_event(event_info[9])
             if scheduled_event:
                 await scheduled_event.edit(
@@ -778,7 +663,7 @@ class Events(commands.Cog):
         event_id = int(event_id)
 
         # Return on bad inputs
-        if (event_id,) not in self.fetch_event_ids():
+        if (event_id,) not in dbfunc.fetch_event_ids():
             await interaction.followup.send('That event does not exist.')
             return
         if dps_limit < -1:
@@ -789,7 +674,7 @@ class Events(commands.Cog):
             return
 
         # Only allow the event's host to limit their event's signups
-        event_info = self.get_event_info(event_id)
+        event_info = dbfunc.get_event_info(event_id)
         if interaction.user.id != event_info[2]:
             await interaction.followup.send('You cannot limit signups when you are not the host!')
             self.log_message(f'User {interaction.user.id} tried to limit signups for event {event_id} but is not the host!')
@@ -799,7 +684,7 @@ class Events(commands.Cog):
         field_names = []
         removed_members = []
         for role in role_limits:
-            signup_count = len(self.fetch_event_role_signup_info(event_id, role))
+            signup_count = len(dbfunc.fetch_event_role_signup_info(event_id, role))
 
             # User does not want a DPS/Support limit
             if role_limits[role][0] == -1:
@@ -819,7 +704,7 @@ class Events(commands.Cog):
             else:
                 # Check to see if current role signups are higher than the limit.
                 if signup_count > role_limits[role][0]:
-                    removed_members.append((self.delete_latest_n_role_signups(event_id, role, signup_count-role_limits[role][0]), role))
+                    removed_members.append((dbfunc.delete_latest_n_role_signups(event_id, role, signup_count-role_limits[role][0]), role))
 
                 # Show signup count versus sign up limit per role
                 field_names.append(
@@ -859,7 +744,7 @@ class Events(commands.Cog):
                 await user.send(f'You have been removed from `{event_info[4]}` on <t:{event_info[3]}> because the host has added signup limits for your role.')
 
         # Insert the limits into the event database
-        self.insert_event_limits(event_id, role_limits[self.dps_role][0], role_limits[self.support_role][0])
+        dbfunc.insert_event_limits(event_id, role_limits[self.dps_role][0], role_limits[self.support_role][0])
 
         # Alert the user.
         await interaction.followup.send(f'Your event now has a DPS limit of [{role_limits[self.dps_role][0]}] and a support limit of [{role_limits[self.support_role][0]}]. Any additional signups have been removed.')
@@ -872,7 +757,7 @@ class Events(commands.Cog):
             event_message = await self.get_event_message(self.bot.guild_channels[interaction.guild_id], event_id)
 
             # Remove all of the user's signups on the event.
-            self.delete_user_from_signups(event_id, member.id)
+            dbfunc.delete_user_from_signups(event_id, member.id)
             await event_message.remove_reaction(self.dps_emoji, member)
             await event_message.remove_reaction(self.support_emoji, member)
             await interaction.followup.send(f'Removed {member.display_name}')
@@ -890,8 +775,8 @@ class Events(commands.Cog):
         await interaction.response.defer()
         event_id = int(event_id)
 
-        player_ids = self.fetch_event_signup_distinct_player_ids(event_id)
-        event_info = self.get_event_info(event_id)
+        player_ids = dbfunc.fetch_event_signup_distinct_player_ids(event_id)
+        event_info = dbfunc.get_event_info(event_id)
         mentions = ' '.join([f'<@{id[0]}>' for id in player_ids])
         message = ' '.join([
             f'{interaction.user.display_name} is reminding',
@@ -906,7 +791,7 @@ class Events(commands.Cog):
         '''Sends you a list of the events you are signed up for.'''
         await interaction.response.defer(ephemeral=True)
 
-        event_ids = self.fetch_distinct_player_signup_events(interaction.user.id, interaction.guild_id)
+        event_ids = dbfunc.fetch_distinct_player_signup_events(interaction.user.id, interaction.guild_id)
         p_msgable = self.bot.get_partial_messageable(self.bot.guild_channels[interaction.guild_id])
         embeds = []
 
@@ -930,7 +815,7 @@ class Events(commands.Cog):
         await interaction.response.defer()
 
         member = member or interaction.user
-        event_ids = self.fetch_distinct_player_signup_events(member.id, interaction.guild_id)
+        event_ids = dbfunc.fetch_distinct_player_signup_events(member.id, interaction.guild_id)
         p_msgable = self.bot.get_partial_messageable(self.bot.guild_channels[interaction.guild_id])
         embeds = []
 
@@ -944,205 +829,10 @@ class Events(commands.Cog):
         else:
             await interaction.followup.send(f'{member.display_name} is not signed up to any events.')
 
-    def get_event_info(self, event_id):
-        con = sqlite3.connect(self.bot.db_path)
-        cur = con.cursor()
-        result = cur.execute("SELECT * FROM events WHERE event_id=?", (int(event_id),)).fetchone()
-        con.close()
-
-        return result
-
     async def get_event_message(self, channel_id, message_id):
         return await self.bot.get_partial_messageable(int(channel_id)).fetch_message(int(message_id))
 
-    def get_guild_channel_id(self, guild_id):
-        con = sqlite3.connect(self.bot.db_path)
-        cur = con.cursor()
-        result = cur.execute("SELECT channel_id FROM guild_channel_id WHERE guild_id=?", (int(guild_id),)).fetchone()
-        con.close()
-
-        return result
-
-    def fetch_events(self):
-        con = sqlite3.connect(self.bot.db_path)
-        cur = con.cursor()
-        result = cur.execute("SELECT * FROM events").fetchall()
-        con.close()
-
-        return result
-
-    def fetch_event_ids(self):
-        con = sqlite3.connect(self.bot.db_path)
-        cur = con.cursor()
-        result = cur.execute("SELECT event_id FROM events").fetchall()
-        con.close()
-
-        return result
-
-    def fetch_event_signup_info(self, event_id):
-        con = sqlite3.connect(self.bot.db_path)
-        cur = con.cursor()
-        result = cur.execute("SELECT * FROM signups WHERE event_id=?", (int(event_id),)).fetchall()
-        con.close()
-        
-        return result
-
-    def fetch_event_role_signup_info(self, event_id, role):
-        con = sqlite3.connect(self.bot.db_path)
-        cur = con.cursor()
-        result = cur.execute("SELECT * FROM signups WHERE event_id=? AND role=?", (int(event_id), role)).fetchall()
-        con.close()
-        
-        return result
-
-    def fetch_event_signup_distinct_player_ids(self, event_id):
-        con = sqlite3.connect(self.bot.db_path)
-        cur = con.cursor()
-        result = cur.execute("SELECT DISTINCT player_id FROM signups WHERE event_id=?", (int(event_id),)).fetchall()
-        con.close()
-
-        return result
-
-    def fetch_distinct_player_signup_events(self, player_id, guild_id):
-        con = sqlite3.connect(self.bot.db_path)
-        cur = con.cursor()
-        result = cur.execute(
-            """SELECT * FROM events 
-            NATURAL JOIN signups 
-            WHERE signups.player_id=? AND events.guild_id=?
-            GROUP BY event_id 
-            ORDER BY events.unix_timestamp ASC""",
-            (int(player_id), int(guild_id))
-        ).fetchall()
-        con.close()
-
-        return result
-
-    def fetch_guild_channel_ids(self):
-        con = sqlite3.connect(self.bot.db_path)
-        cur = con.cursor()
-        result = cur.execute("SELECT * FROM guild_channel_id").fetchall()
-        con.close()
-
-        return result
-
-    def fetch_scheduled_event_ids(self):
-        con = sqlite3.connect(self.bot.db_path)
-        cur = con.cursor()
-        result = cur.execute("SELECT scheduled_event_id FROM events").fetchall()
-        con.close()
-
-        return result
-
-    def set_no_auto_delete(self, event_id, value):
-        con = sqlite3.connect(self.bot.db_path)
-        cur = con.cursor()
-        cur.execute("UPDATE events SET no_auto_delete=? WHERE event_id=?", (value, int(event_id)))
-        con.commit()
-        con.close()
-
-    def set_db_event_title(self, event_id, title):
-        con = sqlite3.connect(self.bot.db_path)
-        cur = con.cursor()
-        cur.execute("UPDATE events SET title=? WHERE event_id=?", (title, int(event_id)))
-        con.commit()
-        con.close()
-
-    def set_db_event_timestamp(self, event_id, timestamp):
-        con = sqlite3.connect(self.bot.db_path)
-        cur = con.cursor()
-        cur.execute("UPDATE events SET unix_timestamp=? WHERE event_id=?", (timestamp, int(event_id)))
-        con.commit()
-        con.close()
-        
-    def insert_event(self, event_id, user_name, user_id, unix_timestamp, title, guild_id, schdl_event_id):
-        con = sqlite3.connect(self.bot.db_path)
-        cur = con.cursor()
-        cur.execute(
-            "INSERT INTO events VALUES (?, ?, ?, ?, ?, NULL, NULL, ?, NULL, ?)", 
-            (int(event_id), user_name, user_id, unix_timestamp, title, guild_id, schdl_event_id)
-        )
-        con.commit()
-        con.close()
-
-    def insert_event_limits(self, event_id, dps_limit, support_limit):
-        con = sqlite3.connect(self.bot.db_path)
-        cur = con.cursor()
-        cur.execute(
-            """UPDATE events 
-            SET dps_limit=?, support_limit=?
-            WHERE event_id=?""", 
-            (dps_limit, support_limit, event_id)
-        )
-        con.commit()
-        con.close()
-
-    def insert_event_signup(self, event_id, user_name, user_id, role, timestamp):
-        con = sqlite3.connect(self.bot.db_path)
-        cur = con.cursor()
-        cur.execute(
-            'INSERT INTO signups VALUES(?, ?, ?, ?, ?)',
-            (int(event_id), user_name, user_id, role, timestamp)
-            )
-        con.commit()
-        con.close()
-
-    def delete_event_by_id(self, event_id):
-        con = sqlite3.connect(self.bot.db_path)
-        cur = con.cursor()
-        cur.execute("DELETE FROM events WHERE event_id=?",(int(event_id),))
-        con.commit()
-        con.close()
-
-    def delete_user_from_signups(self, event_id, user_id):
-        con = sqlite3.connect(self.bot.db_path)
-        cur = con.cursor()
-        cur.execute(
-            "DELETE FROM signups WHERE event_id=? AND player_id=?",
-            (int(event_id), user_id)
-            )
-        con.commit()
-        con.close()
-
-    def delete_role_user_from_signups(self, event_id, user_id, role):
-        con = sqlite3.connect(self.bot.db_path)
-        cur = con.cursor()
-        cur.execute(
-            "DELETE FROM signups WHERE event_id=? AND player_id=? AND role=?",
-            (int(event_id), user_id, role)
-            )
-        con.commit()
-        con.close()
-
-    def delete_latest_n_role_signups(self, event_id, role, n):
-        con = sqlite3.connect(self.bot.db_path)
-        cur = con.cursor()
-        result = cur.execute(
-            """SELECT player_name, player_id, signup_timestamp 
-            FROM signups 
-            WHERE event_id=? AND role=?
-            ORDER BY signup_timestamp DESC 
-            LIMIT ?""",
-            (event_id, role, n)
-        ).fetchall()
-        cur.execute(
-            """DELETE FROM signups 
-            WHERE event_id=? AND role=? 
-            AND player_id IN (
-                SELECT player_id 
-                FROM signups 
-                WHERE event_id=? AND role=?
-                ORDER BY signup_timestamp DESC 
-                LIMIT ?
-                )""",
-            (event_id, role, event_id, role, n)
-        )
-        con.commit()
-        con.close()
-
-        return result
-
-    # Check to see if a channel has been designated as the channel for events
+    # Custom check to see if a channel has been designated as the channel for events
     def is_event_channel_set(self, interaction: discord.Interaction) -> bool:
         if interaction.guild_id not in self.bot.guild_channels:
             raise Exceptions.EventChannelNotSet
@@ -1152,7 +842,7 @@ class Events(commands.Cog):
 
     # Check to see if user is host of event
     def is_host(self, user_id, event_id):
-        event_info = self.get_event_info(event_id)
+        event_info = dbfunc.get_event_info(event_id)
         return user_id == event_info[2]
 
     def log_error(self):
@@ -1170,6 +860,204 @@ class Events(commands.Cog):
         f.write(str(message))
         f.write('\n\n')
         f.close()
+
+class EventView(discord.ui.View):
+    def __init__(self, events: Events):
+        self.events = events
+        self.lock = asyncio.Lock()
+        super().__init__(timeout=None)
+
+    @discord.ui.button(style=discord.ButtonStyle.primary, emoji="⚔️", label="DPS", custom_id="DPS_Btn")
+    async def dps_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer()
+        if dbfunc.is_signed_up_role(interaction.message.id, interaction.user.id, self.events.dps_role):
+            await interaction.followup.send(
+                f"You are already signed up as a {self.events.dps_role}",
+                ephemeral=True
+            )
+
+        else:
+            await self.add_signup(interaction, self.events.dps_role)
+
+    @discord.ui.button(style=discord.ButtonStyle.primary, emoji="🩹", label="Support", custom_id="Supp_Btn")
+    async def support_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer()
+        if dbfunc.is_signed_up_role(interaction.message.id, interaction.user.id, self.events.support_role):
+            await interaction.followup.send(
+                f"You are already signed up as a {self.events.support_role}",
+                ephemeral=True
+            )
+
+        else:
+            await self.add_signup(interaction, self.events.support_role)
+
+    @discord.ui.button(style=discord.ButtonStyle.secondary, label="Withdraw", custom_id="Withdraw_Btn")
+    async def withdraw_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer()
+
+        # TODO confirm if this is correct
+        async with self.lock:
+            event_message = interaction.message
+            event_id = event_message.id
+            embed = event_message.embeds[0]
+
+            dbfunc.delete_user_from_signups(event_id, interaction.user.id)
+            signups = dbfunc.fetch_event_signup_info(event_id)
+            dps_ids = [row[2] for row in signups if row[3] == self.events.dps_role]
+            support_ids = [row[2] for row in signups if row[3] == self.events.support_role]
+
+            # Set DPS field
+            signup_limit = dbfunc.get_event_info(event_id)[5]
+            if signup_limit is not None:
+                field_name = " ".join([self.events.dps_role, self.events.dps_emoji, "-", f"({len(dps_ids)}/{signup_limit})"])
+            else:
+                field_name = " ".join([self.events.dps_role, self.events.dps_emoji, "-", f"({len(dps_ids)})"])
+            if len(dps_ids) == 0:
+                signups = '\u200b'
+            else:
+                signups = '\n'.join(map(lambda x: f'<@{x}>', dps_ids))
+            embed.set_field_at(
+                index=0,
+                name=field_name,
+                value=signups
+            )
+
+            # Set Support field
+            signup_limit = dbfunc.get_event_info(event_id)[6]
+            if signup_limit is not None:
+                field_name = " ".join([self.events.support_role, self.events.support_emoji, "-", f"({len(support_ids)}/{signup_limit})"])
+            else:
+                field_name = " ".join([self.events.support_role, self.events.support_emoji, "-", f"({len(support_ids)})"])
+            if len(support_ids) == 0:
+                signups = '\u200b'
+            else:
+                signups = '\n'.join(map(lambda x: f'<@{x}>', support_ids))
+            embed.set_field_at(
+                index=1,
+                name=field_name,
+                value=signups
+            )
+
+            await event_message.edit(embed=embed)
+
+        print(f"User ID {interaction.user.id} no longer signed up for event ID {event_id}")
+
+    @discord.ui.button(style=discord.ButtonStyle.danger, label="End Event", custom_id="End_Btn")
+    async def end_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        user_perms = interaction.channel.permissions_for(interaction.user)
+        if user_perms.manage_events == True:
+            await interaction.response.send_message(
+                content=(
+                    f"Are you sure you want to end event: ``{interaction.message.embeds[0].title}``?\n"
+                    "Confirmation will disappear in 3 minutes to prevent unwanted event deletions"
+                ),
+                view=EndEventConfirmationView(interaction)
+            )
+        
+        else:
+            await interaction.response.send_message(
+                "You must have the manage_events permission to end events.",
+                ephemeral=True
+            )
+
+    async def add_signup(self, interaction: discord.Interaction, role):
+        event_message = interaction.message
+        event_id = event_message.id
+        if role == self.events.dps_role:
+            signup_limit = dbfunc.get_event_info(event_id)[5]
+            role_emoji = self.events.dps_emoji
+        elif role == self.events.support_role:
+            signup_limit = dbfunc.get_event_info(event_id)[6]
+            role_emoji = self.events.support_emoji
+
+        # TODO confirm if this is correct
+        async with self.lock:
+            signup_count = len(dbfunc.fetch_event_role_signup_info(event_id, role))
+            if signup_limit is not None:
+                if signup_limit - 1 < signup_count:
+                    return await interaction.user.send(f"Unable to add your signup because the host has limited signups for the event to {signup_limit} people.")
+
+                field_name = " ".join([role, role_emoji, "-", f'({signup_count + 1}/{signup_limit})'])
+
+            else:
+                field_name = " ".join([role, role_emoji, "-", f'({signup_count + 1})'])
+
+            embed = event_message.embeds[0]
+            dbfunc.insert_event_signup(
+                event_id,
+                interaction.user.display_name,
+                interaction.user.id,
+                role,
+                int(datetime.datetime.now().timestamp())
+            )
+            result = dbfunc.fetch_event_role_signup_info(event_id, role)
+            signups = "\n".join(map(lambda x: f"<@{x[2]}>", result))
+
+            embed.set_field_at(
+                index=self.events.role_dict[role_emoji][1],
+                name=field_name,
+                value=signups
+            )
+
+            await event_message.edit(embed=embed)
+
+        print(f"User ID {interaction.user.id} signed up for event ID {event_id} as {role}")
+
+class EndEventConfirmationView(discord.ui.View):
+    def __init__(self, orig_msg):
+        self.orig_msg = orig_msg
+        super().__init__(timeout=180)
+
+    async def on_timeout(self):
+        await self.orig_msg.delete_original_response()
+
+    @discord.ui.button(label="Yes", style=discord.ButtonStyle.success)
+    async def yes_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        '''End an event that has concluded.'''
+        await interaction.response.defer(ephemeral=True)
+
+        # Check to make sure that the confirming user is the
+        # same as the user who pressed the end event button
+        if interaction.user != self.orig_msg.user:
+            return await interaction.followup.send(
+                "You are not the user who initiated this confirmation window.",
+                ephemeral=True
+            )
+
+        event_id = self.orig_msg.message.id
+        event_info = dbfunc.get_event_info(event_id)
+
+        if not event_info:
+            return await interaction.followup.send('Event does not exist.')
+
+        player_ids = dbfunc.fetch_event_signup_distinct_player_ids(event_id)
+        for id in player_ids:
+            dbfunc.delete_user_from_signups(event_id, id[0])
+
+        dbfunc.delete_event_by_id(event_id)
+        event_message = await discord.utils.get(interaction.channel.history(), id=event_id)
+        await event_message.delete()
+        scheduled_event = interaction.guild.get_scheduled_event(event_info[9])
+        if scheduled_event:
+            await scheduled_event.delete()
+
+        await self.orig_msg.delete_original_response()
+        # explicitly stop listening to interaction events. on_timeout will not be called.
+        self.stop()
+    
+    @discord.ui.button(label="No", style=discord.ButtonStyle.danger)
+    async def no_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # Check to make sure that the confirming user is the
+        # same as the user who pressed the end event button
+        if interaction.user != self.orig_msg.user:
+            return await interaction.response.send_message(
+                "You are not the user who initiated this confirmation window.",
+                ephemeral=True
+            )
+
+        await self.orig_msg.delete_original_response()
+        # explicitly stop listening to interaction events. on_timeout will not be called.
+        self.stop()
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(Events(bot))

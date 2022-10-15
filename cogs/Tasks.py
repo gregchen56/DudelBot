@@ -3,6 +3,7 @@ from discord import app_commands
 from discord.ext import commands, tasks
 import asyncio
 import datetime
+import DatabaseFunctions as dbfunc
 
 class Tasks(commands.Cog):
     def __init__(self, bot: commands.Bot) -> None:
@@ -17,7 +18,7 @@ class Tasks(commands.Cog):
     async def event_done_checker(self):
         'Check to see if an event has been done for over 8 hours'
         if self.events is not None:
-            result = self.events.fetch_events()
+            result = dbfunc.fetch_events()
             now = int(discord.utils.utcnow().timestamp())
             for row in result:
                 # Ask the user if they want to end their event if it has been 8 hours
@@ -31,7 +32,7 @@ class Tasks(commands.Cog):
                         embed=event_message.embeds[0],
                         view=view
                     )
-                    self.events.set_no_auto_delete(row[0], 'Pending')
+                    dbfunc.set_no_auto_delete(row[0], 'Pending')
 
     @event_done_checker.before_loop
     async def before_event_done_checker(self):
@@ -59,13 +60,13 @@ class EventDoneView(discord.ui.View):
         await self.message.edit(view=self)
 
     async def end_event(self):
-        event_info = self.events.get_event_info(self.event_id)
-        player_ids = self.events.fetch_event_signup_distinct_player_ids(self.event_id)
+        event_info = dbfunc.get_event_info(self.event_id)
+        player_ids = dbfunc.fetch_event_signup_distinct_player_ids(self.event_id)
         for id in player_ids:
-            self.events.delete_user_from_signups(self.event_id, id[0])
+            dbfunc.delete_user_from_signups(self.event_id, id[0])
 
-        self.events.delete_event_by_id(self.event_id)
-        channel_id = self.events.get_guild_channel_id(event_info[7])
+        dbfunc.delete_event_by_id(self.event_id)
+        channel_id = dbfunc.get_guild_channel_id(event_info[7])
         event_message = await self.events.get_event_message(channel_id[0], self.event_id)
         await event_message.delete()
 
@@ -85,11 +86,11 @@ class EventDoneView(discord.ui.View):
     async def no_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.disable_buttons()
         self.stop() # explicitly stop listening to interaction events. on_timeout will not be called.
-        self.events.set_no_auto_delete(self.event_id, 'True')
+        dbfunc.set_no_auto_delete(self.event_id, 'True')
         await interaction.response.send_message('Okay. I won\'t delete this event')
         
-        event_info = self.events.get_event_info(self.event_id)
-        channel_id = self.events.get_guild_channel_id(event_info[7])
+        event_info = dbfunc.get_event_info(self.event_id)
+        channel_id = dbfunc.get_guild_channel_id(event_info[7])
         event_message = await self.events.get_event_message(channel_id[0], self.event_id)
         embed = event_message.embeds[0]
         embed.set_footer(text = f'Event ID: {self.event_id} - DO NOT DELETE')

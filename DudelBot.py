@@ -3,10 +3,11 @@ from discord.ext import commands
 from discord import app_commands
 from os import listdir, getenv
 from dotenv import load_dotenv
-import sqlite3
 from datetime import datetime as dt
 import traceback
 import Exceptions
+import cogs.Events
+import DatabaseFunctions as dbfunc
 
 class MyBot(commands.Bot):
     def __init__(self, intents):
@@ -16,10 +17,12 @@ class MyBot(commands.Bot):
 
     async def setup_hook(self):
         await self.init_cogs()
+        self.events = self.get_cog('Events')
+        self.add_view(cogs.Events.EventView(self.events))
         await self.tree.sync()
 
     async def on_ready(self):
-        for row in self.fetch_guild_channel_ids():
+        for row in dbfunc.fetch_guild_channel_ids():
             self.guild_channels.update({row[0]: row[1]})
         print(f'Logged in as {self.user} (ID: {self.user.id})!')
         print('-----------------------------------------------------')
@@ -30,14 +33,6 @@ class MyBot(commands.Bot):
 
     def fetch_cog_filenames(self):
         return [f[:-3] for f in listdir('./cogs') if f.endswith('.py')]
-
-    def fetch_guild_channel_ids(self):
-        con = sqlite3.connect(self.db_path)
-        cur = con.cursor()
-        result = cur.execute("SELECT * FROM guild_channel_id").fetchall()
-        con.close()
-
-        return result
 
     def log_error(self):
         f = open('./logs/exception_log.log', 'a')
