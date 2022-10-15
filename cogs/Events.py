@@ -664,14 +664,11 @@ class Events(commands.Cog):
 
         # Return on bad inputs
         if (event_id,) not in dbfunc.fetch_event_ids():
-            await interaction.followup.send('That event does not exist.')
-            return
+            return await interaction.followup.send("That event does not exist.")
         if dps_limit < -1:
-            await interaction.followup.send('Bad dps_limit input')
-            return
+            return await interaction.followup.send("Bad dps_limit input")
         if support_limit < -1:
-            await interaction.followup.send('Bad support_limit input')
-            return
+            return await interaction.followup.send("Bad support_limit input")
 
         # Only allow the event's host to limit their event's signups
         event_info = dbfunc.get_event_info(event_id)
@@ -758,8 +755,7 @@ class Events(commands.Cog):
 
             # Remove all of the user's signups on the event.
             dbfunc.delete_user_from_signups(event_id, member.id)
-            await event_message.remove_reaction(self.dps_emoji, member)
-            await event_message.remove_reaction(self.support_emoji, member)
+            await self.update_event_signups(event_message)
             await interaction.followup.send(f'Removed {member.display_name}')
             
             await member.send(f'The host has manually removed you from the following event.', embed=event_message.embeds[0].copy())
@@ -861,6 +857,48 @@ class Events(commands.Cog):
         f.write('\n\n')
         f.close()
 
+    async def update_event_signups(self, event_message: discord.Message):
+        async with self.lock:
+            embed = event_message.embeds[0]
+
+            signups = dbfunc.fetch_event_signup_info(event_message.id)
+            dps_ids = [row[2] for row in signups if row[3] == self.dps_role]
+            support_ids = [row[2] for row in signups if row[3] == self.support_role]
+
+            # Set DPS field
+            signup_limit = dbfunc.get_event_info(event_message.id)[5]
+            if signup_limit is not None:
+                field_name = " ".join([self.dps_role, self.dps_emoji, "-", f"({len(dps_ids)}/{signup_limit})"])
+            else:
+                field_name = " ".join([self.dps_role, self.dps_emoji, "-", f"({len(dps_ids)})"])
+            if len(dps_ids) == 0:
+                signups = '\u200b'
+            else:
+                signups = '\n'.join(map(lambda x: f'<@{x}>', dps_ids))
+            embed.set_field_at(
+                index=0,
+                name=field_name,
+                value=signups
+            )
+
+            # Set Support field
+            signup_limit = dbfunc.get_event_info(event_message.id)[6]
+            if signup_limit is not None:
+                field_name = " ".join([self.support_role, self.support_emoji, "-", f"({len(support_ids)}/{signup_limit})"])
+            else:
+                field_name = " ".join([self.support_role, self.support_emoji, "-", f"({len(support_ids)})"])
+            if len(support_ids) == 0:
+                signups = '\u200b'
+            else:
+                signups = '\n'.join(map(lambda x: f'<@{x}>', support_ids))
+            embed.set_field_at(
+                index=1,
+                name=field_name,
+                value=signups
+            )
+
+            await event_message.edit(embed=embed)
+
 class EventView(discord.ui.View):
     def __init__(self, events: Events):
         self.events = events
@@ -894,53 +932,9 @@ class EventView(discord.ui.View):
     @discord.ui.button(style=discord.ButtonStyle.secondary, label="Withdraw", custom_id="Withdraw_Btn")
     async def withdraw_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.defer()
-
-        # TODO confirm if this is correct
-        async with self.lock:
-            event_message = interaction.message
-            event_id = event_message.id
-            embed = event_message.embeds[0]
-
-            dbfunc.delete_user_from_signups(event_id, interaction.user.id)
-            signups = dbfunc.fetch_event_signup_info(event_id)
-            dps_ids = [row[2] for row in signups if row[3] == self.events.dps_role]
-            support_ids = [row[2] for row in signups if row[3] == self.events.support_role]
-
-            # Set DPS field
-            signup_limit = dbfunc.get_event_info(event_id)[5]
-            if signup_limit is not None:
-                field_name = " ".join([self.events.dps_role, self.events.dps_emoji, "-", f"({len(dps_ids)}/{signup_limit})"])
-            else:
-                field_name = " ".join([self.events.dps_role, self.events.dps_emoji, "-", f"({len(dps_ids)})"])
-            if len(dps_ids) == 0:
-                signups = '\u200b'
-            else:
-                signups = '\n'.join(map(lambda x: f'<@{x}>', dps_ids))
-            embed.set_field_at(
-                index=0,
-                name=field_name,
-                value=signups
-            )
-
-            # Set Support field
-            signup_limit = dbfunc.get_event_info(event_id)[6]
-            if signup_limit is not None:
-                field_name = " ".join([self.events.support_role, self.events.support_emoji, "-", f"({len(support_ids)}/{signup_limit})"])
-            else:
-                field_name = " ".join([self.events.support_role, self.events.support_emoji, "-", f"({len(support_ids)})"])
-            if len(support_ids) == 0:
-                signups = '\u200b'
-            else:
-                signups = '\n'.join(map(lambda x: f'<@{x}>', support_ids))
-            embed.set_field_at(
-                index=1,
-                name=field_name,
-                value=signups
-            )
-
-            await event_message.edit(embed=embed)
-
-        print(f"User ID {interaction.user.id} no longer signed up for event ID {event_id}")
+        dbfunc.delete_user_from_signups(interaction.message.id, interaction.user.id)
+        await self.events.update_event_signups(interaction.message)
+        print(f"User ID {interaction.user.id} no longer signed up for event ID {interaction.message.id}")
 
     @discord.ui.button(style=discord.ButtonStyle.danger, label="End Event", custom_id="End_Btn")
     async def end_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
