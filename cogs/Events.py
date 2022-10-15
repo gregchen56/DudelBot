@@ -290,7 +290,7 @@ class Events(commands.Cog):
             return
 
         # Create the embed
-        descr = f'''Host: {interaction.user.display_name}\n
+        descr = f'''Host: <@{interaction.user.id}>\n
                 🕙 {discord.utils.format_dt(e_datetime, style='f')}\n\u200b'''
         embed = discord.Embed(
             title = title,
@@ -905,12 +905,17 @@ class EventView(discord.ui.View):
     async def end_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         user_perms = interaction.channel.permissions_for(interaction.user)
         if user_perms.manage_events == True:
+            # Using an ephemeral message instead of sending a public
+            # message, then deleting it afterwards prevents a white
+            # "unread" message notification from showing up for the
+            # text channel
             await interaction.response.send_message(
                 content=(
                     f"Are you sure you want to end event: ``{interaction.message.embeds[0].title}``?\n"
-                    "Confirmation will disappear in 3 minutes to prevent unwanted event deletions"
+                    "Confirmation will timeout in 3 minutes to prevent unwanted event deletions"
                 ),
-                view=EndEventConfirmationView(interaction)
+                view=EndEventConfirmationView(interaction),
+                ephemeral=True
             )
         
         else:
@@ -965,23 +970,23 @@ class EventView(discord.ui.View):
 class EndEventConfirmationView(discord.ui.View):
     def __init__(self, orig_msg):
         self.orig_msg = orig_msg
-        super().__init__(timeout=180)
+        super().__init__(timeout=10)
+
+    async def disable_buttons(self):
+        # Disable the buttons
+        for button in self.children:
+            button.disabled = True
+        
+        await self.orig_msg.edit_original_response(view=self)
 
     async def on_timeout(self):
-        await self.orig_msg.delete_original_response()
+        await self.disable_buttons()
 
     @discord.ui.button(label="Yes", style=discord.ButtonStyle.success)
     async def yes_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         '''End an event that has concluded.'''
-        await interaction.response.defer(ephemeral=True)
-
-        # Check to make sure that the confirming user is the
-        # same as the user who pressed the end event button
-        if interaction.user != self.orig_msg.user:
-            return await interaction.followup.send(
-                "You are not the user who initiated this confirmation window.",
-                ephemeral=True
-            )
+        await interaction.response.defer()
+        await self.disable_buttons()
 
         event_id = self.orig_msg.message.id
         event_info = dbfunc.get_event_info(event_id)
@@ -1000,21 +1005,13 @@ class EndEventConfirmationView(discord.ui.View):
         if scheduled_event:
             await scheduled_event.delete()
 
-        await self.orig_msg.delete_original_response()
         # explicitly stop listening to interaction events. on_timeout will not be called.
         self.stop()
     
     @discord.ui.button(label="No", style=discord.ButtonStyle.danger)
     async def no_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # Check to make sure that the confirming user is the
-        # same as the user who pressed the end event button
-        if interaction.user != self.orig_msg.user:
-            return await interaction.response.send_message(
-                "You are not the user who initiated this confirmation window.",
-                ephemeral=True
-            )
-
-        await self.orig_msg.delete_original_response()
+        await interaction.response.defer()
+        await self.disable_buttons()
         # explicitly stop listening to interaction events. on_timeout will not be called.
         self.stop()
 
