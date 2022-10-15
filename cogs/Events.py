@@ -678,7 +678,6 @@ class Events(commands.Cog):
             return
         
         role_limits = {self.dps_role : [dps_limit, self.dps_emoji], self.support_role : [support_limit, self.support_emoji]}
-        field_names = []
         removed_members = []
         for role in role_limits:
             signup_count = len(dbfunc.fetch_event_role_signup_info(event_id, role))
@@ -686,62 +685,28 @@ class Events(commands.Cog):
             # User does not want a DPS/Support limit
             if role_limits[role][0] == -1:
                 role_limits[role][0] = None
-                field_names.append(
-                    ' '.join(
-                        [
-                            role,
-                            role_limits[role][1],
-                            '-',
-                            f'({signup_count})'
-                        ]
-                    )
-                )
 
             # User specified a DPS/Support limit
             else:
                 # Check to see if current role signups are higher than the limit.
+                # Remove excess signups.
                 if signup_count > role_limits[role][0]:
                     removed_members.append((dbfunc.delete_latest_n_role_signups(event_id, role, signup_count-role_limits[role][0]), role))
 
-                # Show signup count versus sign up limit per role
-                field_names.append(
-                    ' '.join(
-                        [
-                            role,
-                            role_limits[role][1],
-                            '-',
-                            f'({min(signup_count, role_limits[role][0])}/{role_limits[role][0]})'
-                        ]
-                    )
-                )
-
-        # Update the event message to display the new signup limits
-        event_message = await self.get_event_message(self.bot.guild_channels[interaction.guild_id], event_id)
-        embed = event_message.embeds[0]
-        embed.set_field_at(
-            index=0,
-            name=field_names[0],
-            value=embed.fields[0].value
-        )
-        embed.set_field_at(
-            index=1,
-            name=field_names[1],
-            value=embed.fields[1].value
-        )
-        await event_message.edit(embed=embed)
-
-        # Remove excess signups. removed_members is a list of up to 2 tuples. Each tuple
+        # removed_members is a list of up to 2 tuples. Each tuple
         # is in the form of ([], str). The list in the first index is a list of tuples.
-        # This only removes the user's reaction from the event and let's the
-        # on_raw_reaction_remove listener remove their name from the event embed message.
+        # Alert users that they have been removed from the event.
         for tuple in removed_members:
             for item in tuple[0]:
                 user = self.bot.get_user(item[1])
-                await event_message.remove_reaction(role_limits[tuple[1]][1], user)
                 await user.send(f'You have been removed from `{event_info[4]}` on <t:{event_info[3]}> because the host has added signup limits for your role.')
 
         # Insert the limits into the event database
         dbfunc.insert_event_limits(event_id, role_limits[self.dps_role][0], role_limits[self.support_role][0])
+        
+        # Update the event message to display the new signup limits
+        event_message = await self.get_event_message(self.bot.guild_channels[interaction.guild_id], event_id)
+        await self.update_event_signups(event_message)
 
         # Alert the user.
         await interaction.followup.send(f'Your event now has a DPS limit of [{role_limits[self.dps_role][0]}] and a support limit of [{role_limits[self.support_role][0]}]. Any additional signups have been removed.')
