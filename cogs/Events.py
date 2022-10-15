@@ -912,7 +912,7 @@ class EventView(discord.ui.View):
             await interaction.response.send_message(
                 content=(
                     f"Are you sure you want to end event: ``{interaction.message.embeds[0].title}``?\n"
-                    "Confirmation will timeout in 3 minutes to prevent unwanted event deletions"
+                    "Confirmation will timeout in 1 minute to prevent unwanted event deletions"
                 ),
                 view=EndEventConfirmationView(interaction),
                 ephemeral=True
@@ -970,7 +970,7 @@ class EventView(discord.ui.View):
 class EndEventConfirmationView(discord.ui.View):
     def __init__(self, orig_msg):
         self.orig_msg = orig_msg
-        super().__init__(timeout=10)
+        super().__init__(timeout=60)
 
     async def disable_buttons(self):
         # Disable the buttons
