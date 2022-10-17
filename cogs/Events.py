@@ -493,7 +493,6 @@ class Events(commands.Cog):
                         description=scheduled_event.description,
                         start_time=scheduled_event.start_time,
                         end_time=scheduled_event.end_time,
-                        image=scheduled_event.cover_image,
                         location=scheduled_event.location
                     )
 
@@ -632,15 +631,22 @@ class Events(commands.Cog):
             embed.description = ''.join([new_time, cur_desc])
             dbfunc.set_db_event_timestamp(event_id, int(e_datetime.timestamp()))
             await event_message.edit(embed=embed)
+
             event_info = dbfunc.get_event_info(event_id)
             scheduled_event = interaction.guild.get_scheduled_event(event_info[9])
-            if scheduled_event:
+            tdelta = e_datetime - discord.utils.utcnow()
+            if scheduled_event and tdelta.days >= 0:
+                description = (
+                    f"**Host:** <@{event_info[2]}>"
+                    f"        🕙 {discord.utils.format_dt(e_datetime, style='R')}"
+                    "\n\u200b\n"
+                    f"**Sign up here:**\n{event_message.jump_url}"
+                )
                 await scheduled_event.edit(
                     name=scheduled_event.name,
-                    description=scheduled_event.description,
+                    description=description,
                     start_time=e_datetime,
                     end_time=e_datetime + datetime.timedelta(hours=1),
-                    image=scheduled_event.cover_image,
                     location=scheduled_event.location
                 )
             await interaction.followup.send('Done')
