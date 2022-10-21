@@ -1,4 +1,3 @@
-from multiprocessing import Event
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -197,34 +196,27 @@ class Events(commands.Cog):
 
         await interaction.followup.send(file=file, embed=embed)
 
-    # Get the channel id where the command was used. Useful for the set_events_channel command.
-    @app_commands.command()
-    @app_commands.default_permissions(manage_events=True)
-    async def get_channel_id(self, interaction: discord.Interaction):
-        await interaction.response.send_message(f'This channel\'s ID is: {interaction.channel_id}')
-
     # Set the channel in the guild where events will live
     @app_commands.command()
     @app_commands.default_permissions(manage_events=True)
     @app_commands.checks.has_permissions(manage_events=True)
-    async def set_events_channel(self, interaction: discord.Interaction, channel_id: str):
-        await interaction.response.defer()
+    async def set_events_channel(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
         con = sqlite3.connect(self.bot.db_path)
         cur = con.cursor()
         result = cur.execute("SELECT channel_id FROM guild_channel_id WHERE guild_id=?", (interaction.guild_id,)).fetchone()
 
-        channel_id = int(channel_id)
         # Channel ID for the current guild has been set before. Update it instead.
         if result:
-            cur.execute("UPDATE guild_channel_id SET channel_id=? WHERE guild_id=?", (channel_id, interaction.guild_id))
+            cur.execute("UPDATE guild_channel_id SET channel_id=? WHERE guild_id=?", (interaction.channel_id, interaction.guild_id))
 
         # Channel ID for the current guild has never been set. Add it to the database.
         else:
-            cur.execute("INSERT INTO guild_channel_id VALUES (?, ?)", (interaction.guild_id, channel_id))
+            cur.execute("INSERT INTO guild_channel_id VALUES (?, ?)", (interaction.guild_id, interaction.channel_id))
 
         con.commit()
         con.close()
-        self.bot.guild_channels.update({interaction.guild_id: channel_id})
+        self.bot.guild_channels.update({interaction.guild_id: interaction.channel_id})
         await interaction.followup.send('Events channel set')
 
     # Create an event

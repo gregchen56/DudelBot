@@ -58,7 +58,6 @@ class MyBot(commands.Bot):
 #   Embed Links
 #   Attach Files
 #   Read Message History
-#   Add Reactions
 #   Use Slash Commands
 intents = discord.Intents(
     guild_messages=True,
@@ -67,8 +66,7 @@ intents = discord.Intents(
     guilds=True,
     members=True,
     message_content=True,
-    messages=True,
-    reactions=True,
+    messages=True
 )
 load_dotenv()
 token = getenv('DISCORD_TOKEN')
