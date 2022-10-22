@@ -23,6 +23,7 @@ as its Discord API wrapper and is written in Python.
 * UI buttons for attendee sign up and withdraws
 * Custom image support through image link or file upload
 * Default image support for the following in-game raids: Argos, Brelshaza, Kakul-Saydon, Valtan, and Vykas
+* Timezone support so event times display relative to the user
 * Modification of event title, description, date, time, and image
 * Event attendee signup limits
 * Automatic deletion of expired events
