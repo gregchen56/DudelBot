@@ -8,7 +8,7 @@ can create events with a single command and can modify most parameters of any cr
 default raids in the game are implemented and intuitive UI components are included for both host and attendee
 usability.
 
-![Preview](images/readme_images/Overview.png)
+![Preview Image](images/readme_images/Overview.png)
 
 This project uses the latest development branch of [discord.py](https://github.com/Rapptz/discord.py/tree/v2.0.0)
 as its Discord API wrapper and is written in Python.
@@ -19,6 +19,7 @@ as its Discord API wrapper and is written in Python.
     * [Prerequisites](#prerequisites)
     * [Steps](#steps)
 * [How to Use DudelBot](#how-to-use-dudelbot)
+* [Credits](#credits)
 
 ## Features
 * Event creation, deletion, and cancellation
@@ -46,3 +47,6 @@ as its Discord API wrapper and is written in Python.
 2. In the "ADD TO SERVER" dropdown, select the server you would like to invite DudelBot to, then click "Continue"
 3. Ensure all permissions are checked, then click "Authorize"
 4. Choose a text channel in your server where you want DudelBot to create and check for events. Run the /set_events_channel command in the chosen text channel.
+
+## How to Use DudelBot
+Coming soon
