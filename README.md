@@ -11,6 +11,28 @@ usability.
 This project uses the latest development branch of [discord.py](https://github.com/Rapptz/discord.py/tree/v2.0.0)
 as its Discord API wrapper and is written in Python.
 
+## Table of Contents
+* [Features](#features)
+* [Setup](#setup)
+    * [Prerequisites](#prerequisites)
+    * [Steps](#steps)
+* [How to Use DudelBot](#how-to-use-dudelbot)
+
+## Features
+* Event creation, deletion, and cancellation
+* UI buttons for attendee sign up and withdraws
+* Custom image support through image link or file upload
+* Default image support for the following in-game raids: Argos, Brelshaza, Kakul-Saydon, Valtan, and Vykas
+* Modification of event title, description, date, time, and image
+* Event attendee signup limits
+* Automatic deletion of expired events
+* Attendee signup removals
+* Remind attendees about an event by mentioning/pinging event attendees
+* Lists events that a user is sign up for
+* Creates Discord scheduled events for increased visibility towards DudelBot events
+* Custom help command
+* Permission checks for event creation and modification commands
+
 ## Setup
 ### Prerequisites
 1. A Discord [account](https://discord.com/register)
@@ -21,3 +43,5 @@ as its Discord API wrapper and is written in Python.
 2. In the "ADD TO SERVER" dropdown, select the server you would like to invite DudelBot to, then click "Continue"
 3. Ensure all permissions are checked, then click "Authorize"
 4. Choose a text channel in your server where you want DudelBot to create and check for events. Run the /set_events_channel command in the chosen text channel.
+
+## How to Use DudelBot
