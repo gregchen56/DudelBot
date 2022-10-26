@@ -10,9 +10,6 @@ usability.
 
 ![Overview Image](images/readme_images/Overview.png)
 
-This project uses the latest development branch of [discord.py](https://github.com/Rapptz/discord.py/tree/v2.0.0)
-as its Discord API wrapper and is written in Python.
-
 ## Table of Contents
 * [Features](#features)
 * [Setup](#setup)
@@ -34,6 +31,11 @@ as its Discord API wrapper and is written in Python.
 * Creates Discord scheduled events for increased visibility towards DudelBot events
 * Custom help command
 * Permission checks for event creation and modification commands
+
+## Technologies Used
+* Python
+* SQLite
+* Latest development branch of [discord.py](https://github.com/Rapptz/discord.py/tree/v2.0.0)
 
 ## Setup
 ### Prerequisites
