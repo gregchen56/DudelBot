@@ -344,7 +344,8 @@ class Events(commands.Cog):
         # Send the event in chat.
         sent_message = await interaction.followup.send(
             embed=embed,
-            view=EventView(self)
+            view=EventView(self),
+            wait=True
         )
 
         # Set footer to the event's message ID
